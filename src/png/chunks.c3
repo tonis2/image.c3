@@ -1,5 +1,5 @@
 module image::png::chunks;
-import image::png::crc32;
+import std::hash::crc32;
 
 faultdef INVALID_SIGNATURE,
          INVALID_HEADER,
@@ -78,7 +78,7 @@ fn Chunk? parse_chunk(char[] data, usz offset) {
 
 	// Verify CRC (computed over type + data)
 	char[] crc_data = data[offset+4:4+(usz)length];
-	uint computed_crc = crc32::compute(crc_data);
+	uint computed_crc = crc32::hash(crc_data);
 
 	if (computed_crc != chunk.crc) {
 		return INVALID_CHUNK_CRC~;

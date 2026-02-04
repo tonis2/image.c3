@@ -7,7 +7,13 @@
     "src/png/png.c3",
     "src/png/zlib.c3",
     "src/png/image.c3",
-    "src/png/zlib.c3"
+    "src/png/zlib.c3",
+
+    "src/ktx/header.c3",
+    "src/ktx/ktx.c3",
+    "src/ktx/supercompression.c3",
+
+    "src/image.c3"
   ],
   "targets" : {
     "macos-x64" : {

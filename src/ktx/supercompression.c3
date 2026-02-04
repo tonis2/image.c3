@@ -1,6 +1,7 @@
 module image::ktx::supercompression;
 import image::ktx::header;
 import compress::flate;
+import std::hash::adler32;
 
 faultdef DECOMPRESSION_FAILED,
          UNSUPPORTED_SCHEME;
@@ -74,22 +75,10 @@ fn char[]? decompress_zlib(char[] data, Allocator allocator) {
 	                       ((uint)data[^2] << 8) |
 	                       (uint)data[^1];
 
-	if (stored_checksum != adler32(decompressed)) {
+	if (stored_checksum != adler32::hash(decompressed)) {
 		allocator::free(allocator, decompressed);
 		return DECOMPRESSION_FAILED~;
 	}
 
 	return decompressed;
-}
-
-fn uint adler32(char[] data) {
-	uint a = 1;
-	uint b = 0;
-	const uint MOD = 65521;
-
-	foreach (byte : data) {
-		a = (a + byte) % MOD;
-		b = (b + a) % MOD;
-	}
-	return (b << 16) | a;
 }

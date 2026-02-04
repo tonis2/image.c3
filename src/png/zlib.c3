@@ -1,21 +1,10 @@
 module image::png::zlib;
 import compress::flate;
+import std::hash::adler32;
 
 faultdef ZLIB_HEADER_INVALID,
          ZLIB_CHECKSUM_MISMATCH,
          DECOMPRESSION_FAILED;
-
-fn uint adler32(char[] data) {
-	uint a = 1;
-	uint b = 0;
-	const uint MOD = 65521;
-
-	foreach (byte : data) {
-		a = (a + byte) % MOD;
-		b = (b + a) % MOD;
-	}
-	return (b << 16) | a;
-}
 
 fn char[]? decompress(Allocator allocator, char[] data) {
 	// Minimum zlib stream: 2 byte header + 4 byte trailer
@@ -59,7 +48,7 @@ fn char[]? decompress(Allocator allocator, char[] data) {
 	                       ((uint)data[^2] << 8) |
 	                       (uint)data[^1];
 
-	uint computed_checksum = adler32(decompressed);
+	uint computed_checksum = adler32::hash(decompressed);
 
 	if (stored_checksum != computed_checksum) {
 		allocator::free(allocator, decompressed);
