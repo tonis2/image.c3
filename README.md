@@ -20,6 +20,8 @@ An image decoding library for C3 supporting PNG and KTX2 formats.
 
 ### PNG
 
+Load PNG from file
+
 ```c3
 import image::png;
 
@@ -33,6 +35,14 @@ fn void main() {
     // Access pixel data
     char[] pixels = img.pixels;  // Row-major, top-to-bottom
 }
+```
+
+Load from PNG memory
+
+```c3
+char[] png_data = /* ... */;
+Image img = png::load_bytes(png_data)!!;
+defer img.free();
 ```
 
 ### KTX2
@@ -95,13 +105,9 @@ fn void upload_to_vulkan() {
 }
 ```
 
-### Load from memory
+Load from memory
 
 ```c3
-char[] png_data = /* ... */;
-Image img = png::load_bytes(png_data)!!;
-defer img.free();
-
 char[] ktx_data = /* ... */;
 KtxImage tex = ktx::load_bytes(ktx_data)!!;
 defer tex.free();
