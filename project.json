@@ -2,7 +2,7 @@
   // Language version of C3.
   "langrev": "1",
   "warnings": [ "no-unused" ],
-  "dependency-search-paths": [ "lib" ],
+  "dependency-search-paths": [ "src" ],
   "dependencies": [ "compress" ],
   "authors": [ "John Doe <john.doe@example.com>" ],
   "version": "0.1.0",

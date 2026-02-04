@@ -4,6 +4,7 @@ generate_ktx.py
 build/
 out/
 .claude/
+CLAUDE.md
 
 # Object files
 *.o
