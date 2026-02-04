@@ -137,6 +137,4 @@ fn IhdrData? parse_ihdr(Chunk* chunk) {
 	return ihdr;
 }
 
-fn usz chunk_total_size(Chunk* chunk) {
-	return 12 + (usz)chunk.length; // 4 (length) + 4 (type) + data + 4 (crc)
-}
+fn usz Chunk.total_size(Chunk* chunk) => 12 + (usz)chunk.length; // 4 (length) + 4 (type) + data + 4 (crc)

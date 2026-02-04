@@ -16,9 +16,7 @@ fn Image? load_file(String path, Allocator allocator = mem) {
 	return load_bytes(file_data, allocator);
 }
 
-fn Image? tload_file(String path) {
-	return load_file(path, tmem);
-}
+fn Image? tload_file(String path) => load_file(path, tmem);
 
 fn Image? load_bytes(char[] data, Allocator allocator = mem) {
 	// Verify PNG signature
@@ -31,7 +29,7 @@ fn Image? load_bytes(char[] data, Allocator allocator = mem) {
 	// Parse IHDR (must be first chunk)
 	chunks::Chunk ihdr_chunk = chunks::parse_chunk(data, offset)!;
 	chunks::IhdrData ihdr = chunks::parse_ihdr(&ihdr_chunk)!;
-	offset += chunks::chunk_total_size(&ihdr_chunk);
+	offset += ihdr_chunk.total_size();
 
 	// Collect IDAT data and optional PLTE/tRNS
 	List{char} idat_buffer;
@@ -44,7 +42,7 @@ fn Image? load_bytes(char[] data, Allocator allocator = mem) {
 	// Parse remaining chunks
 	while (offset < data.len) {
 		chunks::Chunk chunk = chunks::parse_chunk(data, offset)!;
-		offset += chunks::chunk_total_size(&chunk);
+		offset += chunk.total_size();
 
 		if (chunk.type[..] == "IDAT") {
 			idat_buffer.push_all(chunk.data);
@@ -113,9 +111,7 @@ fn Image? load_bytes(char[] data, Allocator allocator = mem) {
 	};
 }
 
-fn Image? tload_bytes(char[] data) {
-	return load_bytes(data, tmem);
-}
+fn Image? tload_bytes(char[] data) => load_bytes(data, tmem);
 
 fn PixelFormat color_type_to_format(char color_type) {
 	switch (color_type) {

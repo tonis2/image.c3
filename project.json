@@ -10,10 +10,15 @@
   "test-sources": [ "test/**" ],
   "build-dir": "build",
   "output": "build",
+  "script-dir": "./",
   "targets": {
     "image": {
       "type": "executable"
-    }
+    },
+    "zip": {
+			"type": "prepare",
+			"exec": ["zip -r image.c3l ./src manifest.json"]
+		}
   },
   "cpu": "generic",
   "opt": "O0"
