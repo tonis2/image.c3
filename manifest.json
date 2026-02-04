@@ -1,0 +1,20 @@
+{
+  "provides" : "collision",
+  "sources": [
+    "src/png/chunks.c3",
+    "src/png/crc32.c3",
+    "src/png/filters.c3",
+    "src/png/png.c3",
+    "src/png/zlib.c3",
+    "src/png/image.c3",
+    "src/png/zlib.c3"
+  ],
+  "targets" : {
+    "macos-x64" : {
+    },
+    "linux-x64" : {
+    },
+    "windows-x64" : {
+    }
+  }
+}

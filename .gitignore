@@ -1,6 +1,6 @@
 # Prerequisites
 *.d
-
+generate_ktx.py
 build/
 out/
 .claude/
