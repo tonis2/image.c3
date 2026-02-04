@@ -20,7 +20,7 @@ An image decoding library for C3 supporting PNG and KTX2 formats.
 
 ### PNG
 
-Load PNG from file
+Load from file
 
 ```c3
 import image::png;
@@ -37,7 +37,7 @@ fn void main() {
 }
 ```
 
-Load from PNG memory
+Load from memory
 
 ```c3
 char[] png_data = /* ... */;
