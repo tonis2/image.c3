@@ -27,36 +27,12 @@ fn void main() {
 }
 ```
 
-### Temporary allocator
-
-```c3
-fn void process_image() {
-    // Uses temp allocator - no need to free
-    Image img = png::tload_file("photo.png")!!;
-
-    // Process pixels...
-}
-```
-
 ### Load from memory
 
 ```c3
 char[] png_data = /* ... */;
 Image img = png::load_bytes(png_data)!!;
 defer img.free();
-```
-
-## Image struct
-
-```c3
-struct Image {
-    uint width;
-    uint height;
-    char bit_depth;      // 8 or 16
-    PixelFormat format;  // GRAYSCALE, GRAYSCALE_ALPHA, RGB, RGBA
-    char[] pixels;       // Raw pixel data
-    Allocator allocator;
-}
 ```
 
 ## Limitations
@@ -67,4 +43,4 @@ struct Image {
 
 ## Dependencies
 
-- `compress.c3l` - For DEFLATE decompression
+- [`compress.c3l`](https://github.com/konimarti/compress.c3l) - For DEFLATE decompression
