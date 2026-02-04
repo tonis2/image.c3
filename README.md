@@ -11,7 +11,6 @@ A PNG decoding library for C3.
 ## Usage
 
 ```c3
-import image;
 import image::png;
 
 fn void main() {

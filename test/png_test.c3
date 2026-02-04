@@ -1,5 +1,4 @@
 module image::png::test @test;
-import image;
 import image::png;
 import std::io::file;
 
