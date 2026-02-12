@@ -4,7 +4,8 @@ import std::hash::adler32;
 
 faultdef ZLIB_HEADER_INVALID,
          ZLIB_CHECKSUM_MISMATCH,
-         DECOMPRESSION_FAILED;
+         DECOMPRESSION_FAILED,
+         COMPRESSION_FAILED;
 
 fn char[]? decompress(Allocator allocator, char[] data) {
 	// Minimum zlib stream: 2 byte header + 4 byte trailer
@@ -56,4 +57,39 @@ fn char[]? decompress(Allocator allocator, char[] data) {
 	}
 
 	return decompressed;
+}
+
+fn char[]? compress(Allocator allocator, char[] data) {
+	// Compress using DEFLATE
+	char[]? compressed = flate::compress(allocator, data);
+	if (catch err = compressed) {
+		return COMPRESSION_FAILED~;
+	}
+	char[] deflated = compressed;
+
+	// Compute Adler-32 checksum of uncompressed data
+	uint checksum = adler32::hash(data);
+
+	// Assemble: 2-byte header + DEFLATE data + 4-byte Adler-32
+	usz total = 2 + deflated.len + 4;
+	char[] result = allocator::new_array(allocator, char, total);
+
+	// ZLIB header: CMF=0x78 (DEFLATE, 32K window), FLG=0x01
+	result[0] = 0x78;
+	result[1] = 0x01;
+
+	// Copy DEFLATE data
+	for (usz i = 0; i < deflated.len; i++) {
+		result[2 + i] = deflated[i];
+	}
+
+	// Adler-32 checksum (big-endian)
+	result[total - 4] = (char)(checksum >> 24);
+	result[total - 3] = (char)(checksum >> 16);
+	result[total - 2] = (char)(checksum >> 8);
+	result[total - 1] = (char)(checksum);
+
+	allocator::free(allocator, deflated);
+
+	return result;
 }
