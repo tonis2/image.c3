@@ -383,7 +383,7 @@ fn void? encode_code_lengths(ByteWriter *enc, char[] seq) @private => @pool()
 	{
  		// Code length symbol.
 		char sym = seq[i];
-		assert(sym < huff::MAX_CODE_BITS);
+		assert(sym <= huff::MAX_CODE_BITS + 3);
 
 		// Count repetitions of sym.
 		r = 1;
