@@ -8,7 +8,8 @@ import std::collections::list;
 
 faultdef INVALID_SIGNATURE,
          MISSING_PALETTE,
-         INCOMPLETE_DATA;
+         INCOMPLETE_DATA,
+         INVALID_IMAGE_DATA;
 
 fn Image? load_file(String path, Allocator allocator = mem) {
 	char[] file_data = file::load(allocator, path)!;

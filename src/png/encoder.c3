@@ -4,8 +4,40 @@ import image::png::chunks;
 import image::png::zlib;
 import std::hash::crc32;
 import std::io::file;
+import std::io;
+
+// Validate image data for common corruption patterns
+fn bool validate_image_data(Image* img) {
+	if (img.pixels.len == 0) return false;
+	if (img.width == 0 || img.height == 0) return false;
+	
+	// Check for uniform data (all same value) which often indicates NaN->0 conversion
+	char first_val = img.pixels[0];
+	bool all_same = true;
+	usz check_len = img.pixels.len > 1000 ? 1000 : img.pixels.len;
+	
+	for (usz i = 0; i < check_len; i++) {
+		if (img.pixels[i] != first_val) {
+			all_same = false;
+			break;
+		}
+	}
+	
+	if (all_same && img.pixels.len > 100) {
+		io::printfn("  Warning: Image data appears uniform (possible NaN conversion)");
+		return false;
+	}
+	
+	return true;
+}
 
 fn char[]? save_bytes(Image* img, Allocator allocator = mem) {
+	// Validate image data before encoding
+	if (!validate_image_data(img)) {
+		io::printfn("  ERROR: Image data validation failed - refusing to save corrupted image");
+		return INVALID_IMAGE_DATA~;
+	}
+	
 	char color_type = format_to_color_type(img.format);
 
 	// Prepend filter byte (0x00 = None) to each scanline
