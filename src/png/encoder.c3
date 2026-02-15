@@ -7,23 +7,48 @@ import std::io::file;
 import std::io;
 
 // Validate image data for common corruption patterns
-fn bool validate_image_data(Image* img) {
+// If check_all is true, checks every byte (slow). Otherwise samples across the image.
+fn bool validate_image_data(Image* img, bool check_all = false) {
 	if (img.pixels.len == 0) return false;
 	if (img.width == 0 || img.height == 0) return false;
 	
-	// Check for uniform data (all same value) which often indicates NaN->0 conversion
 	char first_val = img.pixels[0];
 	bool all_same = true;
-	usz check_len = img.pixels.len > 1000 ? 1000 : img.pixels.len;
+	usz len = img.pixels.len;
 	
-	for (usz i = 0; i < check_len; i++) {
-		if (img.pixels[i] != first_val) {
-			all_same = false;
-			break;
+	if (check_all) {
+		// Check every single byte - thorough but slow
+		for (usz i = 0; i < len; i++) {
+			if (img.pixels[i] != first_val) {
+				all_same = false;
+				break;
+			}
+		}
+	} else {
+		// Sample across the entire image, not just the first 1000 bytes
+		// Sample at least 1000 bytes or 1% of image (whichever is larger), up to 10% max
+		usz sample_count = len / 100;  // 1% of image
+		if (sample_count < 1000) sample_count = 1000;
+		if (sample_count > len) sample_count = len;
+		usz max_samples = len / 10;
+		if (max_samples < 1) max_samples = 1;
+		if (sample_count > max_samples) sample_count = max_samples;  // Max 10% (min 1)
+		
+		// Calculate stride to sample evenly across the entire image
+		usz stride = len / sample_count;
+		if (stride < 1) stride = 1;
+		
+		usz checked = 0;
+		for (usz i = 0; i < len && checked < sample_count; i += stride) {
+			if (img.pixels[i] != first_val) {
+				all_same = false;
+				break;
+			}
+			checked++;
 		}
 	}
 	
-	if (all_same && img.pixels.len > 100) {
+	if (all_same && len > 100) {
 		io::printfn("  Warning: Image data appears uniform (possible NaN conversion)");
 		return false;
 	}
@@ -31,9 +56,9 @@ fn bool validate_image_data(Image* img) {
 	return true;
 }
 
-fn char[]? save_bytes(Image* img, Allocator allocator = mem) {
+fn char[]? save_bytes(Image* img, Allocator allocator = mem, bool check_valid = false) {
 	// Validate image data before encoding
-	if (!validate_image_data(img)) {
+	if (!validate_image_data(img, check_valid)) {
 		io::printfn("  ERROR: Image data validation failed - refusing to save corrupted image");
 		return INVALID_IMAGE_DATA~;
 	}
@@ -88,15 +113,15 @@ fn char[]? save_bytes(Image* img, Allocator allocator = mem) {
 	return output;
 }
 
-fn void? save_file(Image* img, String path, Allocator allocator = mem) {
-	char[] data = save_bytes(img, allocator)!;
+fn void? save_file(Image* img, String path, Allocator allocator = mem, bool check_valid = false) {
+	char[] data = save_bytes(img, allocator, check_valid)!;
 	defer allocator::free(allocator, data);
 	file::save(path, data)!;
 }
 
-fn char[]? tsave_bytes(Image* img) => save_bytes(img, tmem);
+fn char[]? tsave_bytes(Image* img, bool check_valid = false) => save_bytes(img, tmem, check_valid);
 
-fn void? tsave_file(Image* img, String path) => save_file(img, path, tmem);
+fn void? tsave_file(Image* img, String path, bool check_valid = false) => save_file(img, path, tmem, check_valid);
 
 fn usz write_chunk(char[] buf, String chunk_type, char[] data) {
 	usz len = data.len;
