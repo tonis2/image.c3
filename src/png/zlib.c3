@@ -60,8 +60,9 @@ fn char[]? decompress(Allocator allocator, char[] data) {
 }
 
 fn char[]? compress(Allocator allocator, char[] data) {
-	// Compress using DEFLATE
-	char[]? compressed = flate::compress(allocator, data);
+	// Use stored blocks (uncompressed) to avoid compression bugs
+	// This is a workaround for issues with large data compression
+	char[]? compressed = flate::deflate(allocator, data, &flate::encode_stored_block);
 	if (catch err = compressed) {
 		return COMPRESSION_FAILED~;
 	}
