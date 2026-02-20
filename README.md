@@ -118,7 +118,6 @@ defer tex.free();
 ### PNG
 - No interlaced PNG support (Adam7)
 - No 1/2/4-bit depth support
-- Decode only (no encoding)
 
 ### KTX2
 - No Basis Universal transcoding (BasisLZ supercompression)
