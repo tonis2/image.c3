@@ -30,7 +30,7 @@ struct KtxImage {
 
 fn KtxImage? load_file(String path, Allocator allocator = mem) {
 	char[] file_data = file::load(allocator, path)!;
-	defer allocator::free(allocator, file_data);
+	defer alloc::free(allocator, file_data);
 	return load_bytes(file_data, allocator);
 }
 
@@ -47,10 +47,10 @@ fn KtxImage? load_bytes(char[] data, Allocator allocator = mem) {
 
 	// Parse level index
 	header::LevelIndex[] level_index = header::parse_level_index(data, hdr.level_count, allocator)!;
-	defer allocator::free(allocator, level_index);
+	defer alloc::free(allocator, level_index);
 
 	// Allocate mip levels array
-	MipLevel[] levels = allocator::new_array(allocator, MipLevel, hdr.level_count);
+	MipLevel[] levels = alloc::new_array(allocator, MipLevel, hdr.level_count);
 
 	// Calculate dimensions for each mip level and decompress data
 	uint w = hdr.pixel_width;
@@ -78,10 +78,10 @@ fn KtxImage? load_bytes(char[] data, Allocator allocator = mem) {
 			// Clean up already allocated levels
 			for (uint j = 0; j < i; j++) {
 				if (levels[j].data.len > 0) {
-					allocator::free(allocator, levels[j].data);
+					alloc::free(allocator, levels[j].data);
 				}
 			}
-			allocator::free(allocator, levels);
+			alloc::free(allocator, levels);
 			return INVALID_FILE~;
 		}
 
@@ -119,13 +119,13 @@ fn void KtxImage.free(&self) {
 		// Free each level's data
 		foreach (&level : self.levels) {
 			if (level.data.len > 0) {
-				allocator::free(self.allocator, level.data);
+				alloc::free(self.allocator, level.data);
 				level.data = {};
 			}
 		}
 		// Free the levels array
 		if (self.levels.len > 0) {
-			allocator::free(self.allocator, self.levels);
+			alloc::free(self.allocator, self.levels);
 			self.levels = {};
 		}
 	}

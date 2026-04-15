@@ -1,5 +1,5 @@
 module image::png::zlib;
-import compress::flate;
+import std::compression::deflate;
 import std::hash::adler32;
 
 faultdef ZLIB_HEADER_INVALID,
@@ -36,7 +36,7 @@ fn char[]? decompress(Allocator allocator, char[] data) {
 	char[] raw_deflate = data[2..^4];
 
 	// Decompress using flate::inflate
-	char[]? result = flate::inflate(allocator, raw_deflate);
+	char[]? result = deflate::decompress(allocator, raw_deflate);
 	if (catch err = result) {
 		return DECOMPRESSION_FAILED~;
 	}
@@ -52,7 +52,7 @@ fn char[]? decompress(Allocator allocator, char[] data) {
 	uint computed_checksum = adler32::hash(decompressed);
 
 	if (stored_checksum != computed_checksum) {
-		allocator::free(allocator, decompressed);
+		alloc::free(allocator, decompressed);
 		return ZLIB_CHECKSUM_MISMATCH~;
 	}
 
@@ -60,9 +60,7 @@ fn char[]? decompress(Allocator allocator, char[] data) {
 }
 
 fn char[]? compress(Allocator allocator, char[] data) {
-	// Use stored blocks (uncompressed) to avoid compression bugs
-	// This is a workaround for issues with large data compression
-	char[]? compressed = flate::deflate(allocator, data, &flate::encode_stored_block);
+	char[]? compressed = deflate::compress(allocator, data);
 	if (catch err = compressed) {
 		return COMPRESSION_FAILED~;
 	}
@@ -73,7 +71,7 @@ fn char[]? compress(Allocator allocator, char[] data) {
 
 	// Assemble: 2-byte header + DEFLATE data + 4-byte Adler-32
 	usz total = 2 + deflated.len + 4;
-	char[] result = allocator::new_array(allocator, char, total);
+	char[] result = alloc::new_array(allocator, char, total);
 
 	// ZLIB header: CMF=0x78 (DEFLATE, 32K window), FLG=0x01
 	result[0] = 0x78;
@@ -90,7 +88,7 @@ fn char[]? compress(Allocator allocator, char[] data) {
 	result[total - 2] = (char)(checksum >> 8);
 	result[total - 1] = (char)(checksum);
 
-	allocator::free(allocator, deflated);
+	alloc::free(allocator, deflated);
 
 	return result;
 }

@@ -119,7 +119,7 @@ fn LevelIndex[]? parse_level_index(char[] data, uint level_count, Allocator allo
 		return INVALID_LEVEL_INDEX~;
 	}
 
-	LevelIndex[] levels = allocator::new_array(allocator, LevelIndex, level_count);
+	LevelIndex[] levels = alloc::new_array(allocator, LevelIndex, level_count);
 
 	for (uint i = 0; i < level_count; i++) {
 		usz o = level_index_offset + (usz)i * 24;
@@ -131,7 +131,7 @@ fn LevelIndex[]? parse_level_index(char[] data, uint level_count, Allocator allo
 
 		// Validate level data is within file bounds
 		if (levels[i].byte_offset + levels[i].byte_length > (ulong)data.len) {
-			allocator::free(allocator, levels);
+			alloc::free(allocator, levels);
 			return INVALID_LEVEL_INDEX~;
 		}
 	}

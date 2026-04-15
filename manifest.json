@@ -4,8 +4,7 @@
   "sources": [
     "src/ktx/**",
     "src/png/**",
-    "src/image.c3",
-    "src/compress.c3l/**"
+    "src/image.c3"
   ],
   "targets" : {
     "macos-x64" : {

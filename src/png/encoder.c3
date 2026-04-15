@@ -28,11 +28,11 @@ fn char[]? save_bytes(Image* img, Allocator allocator = mem, bool check_valid = 
 
 	// Prepend filter byte (0x00 = None) to each scanline
 	char[] filtered = apply_filter_none(allocator, img);
-	defer allocator::free(allocator, filtered);
+	defer alloc::free(allocator, filtered);
 
 	// ZLIB compress the filtered data
 	char[] compressed = zlib::compress(allocator, filtered)!;
-	defer allocator::free(allocator, compressed);
+	defer alloc::free(allocator, compressed);
 
 	// Build IHDR data (13 bytes)
 	char[13] ihdr_data;
@@ -52,7 +52,7 @@ fn char[]? save_bytes(Image* img, Allocator allocator = mem, bool check_valid = 
 
 	// Calculate total output size
 	usz total = 8 + (12 + 13) + (12 + compressed.len) + 12;
-	char[] output = allocator::new_array(allocator, char, total);
+	char[] output = alloc::new_array(allocator, char, total);
 	usz pos = 0;
 
 	// PNG signature
@@ -76,7 +76,7 @@ fn char[]? save_bytes(Image* img, Allocator allocator = mem, bool check_valid = 
 
 fn void? save_file(Image* img, String path, Allocator allocator = mem, bool check_valid = false) {
 	char[] data = save_bytes(img, allocator, check_valid)!;
-	defer allocator::free(allocator, data);
+	defer alloc::free(allocator, data);
 	file::save(path, data)!;
 }
 
@@ -128,7 +128,7 @@ fn char[] apply_filter_none(Allocator allocator, Image* img) {
 	usz row_bytes = (usz)img.width * bpp;
 	usz filtered_size = (usz)img.height * (row_bytes + 1);
 
-	char[] filtered = allocator::new_array(allocator, char, filtered_size);
+	char[] filtered = alloc::new_array(allocator, char, filtered_size);
 
 	for (uint y = 0; y < img.height; y++) {
 		usz src_offset = (usz)y * row_bytes;

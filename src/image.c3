@@ -32,7 +32,7 @@ fn Image Image.resize(&self, uint new_width, uint new_height, Allocator allocato
 	usz bpp = self.bytes_per_pixel();
 	usz src_stride = (usz)self.width * bpp;
 	usz dst_stride = (usz)new_width * bpp;
-	char[] dst_pixels = allocator::new_array(allocator, char, (usz)new_width * (usz)new_height * bpp);
+	char[] dst_pixels = alloc::new_array(allocator, char, (usz)new_width * (usz)new_height * bpp);
 
 	for (uint y = 0; y < new_height; y++)
 	{
@@ -86,7 +86,7 @@ fn Image Image.resize(&self, uint new_width, uint new_height, Allocator allocato
 
 fn void Image.free(&self) {
 	if (self.pixels.len > 0 && self.allocator) {
-		allocator::free(self.allocator, self.pixels);
+		alloc::free(self.allocator, self.pixels);
 		self.pixels = {};
 	}
 }

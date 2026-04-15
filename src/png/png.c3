@@ -13,7 +13,7 @@ faultdef INVALID_SIGNATURE,
 
 fn Image? load_file(String path, Allocator allocator = mem) {
 	char[] file_data = file::load(allocator, path)!;
-	defer allocator::free(allocator, file_data);
+	defer alloc::free(allocator, file_data);
 	return load_bytes(file_data, allocator);
 }
 
@@ -65,7 +65,7 @@ fn Image? load_bytes(char[] data, Allocator allocator = mem) {
 	// Decompress IDAT data
 	char[] compressed_data = idat_buffer.array_view();
 	char[] decompressed = zlib::decompress(allocator, compressed_data)!;
-	defer allocator::free(allocator, decompressed);
+	defer alloc::free(allocator, decompressed);
 
 	// Calculate bytes per pixel for filter reconstruction
 	usz filter_bpp = get_filter_bytes_per_pixel(ihdr.color_type, ihdr.bit_depth);
@@ -92,7 +92,7 @@ fn Image? load_bytes(char[] data, Allocator allocator = mem) {
 	}
 
 	usz output_size = (usz)ihdr.width * (usz)ihdr.height * out_bpp;
-	char[] output = allocator::new_array(allocator, char, output_size);
+	char[] output = alloc::new_array(allocator, char, output_size);
 
 	if (ihdr.color_type == chunks::COLOR_TYPE_INDEXED) {
 		// Expand indexed to RGB/RGBA

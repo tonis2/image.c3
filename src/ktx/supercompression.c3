@@ -1,6 +1,6 @@
 module image::ktx::supercompression;
 import image::ktx::header;
-import compress::flate;
+import std::compression::deflate;
 import std::hash::adler32;
 
 faultdef DECOMPRESSION_FAILED,
@@ -35,7 +35,7 @@ fn char[]? decompress(
 }
 
 fn char[]? copy_data(char[] data, Allocator allocator) {
-	char[] copy = allocator::new_array(allocator, char, data.len);
+	char[] copy = alloc::new_array(allocator, char, data.len);
 	copy[..] = data[..];
 	return copy;
 }
@@ -64,7 +64,7 @@ fn char[]? decompress_zlib(char[] data, Allocator allocator) {
 	char[] raw_deflate = data[2..^4];
 
 	// Decompress using flate::inflate
-	char[]? decompressed = flate::inflate(allocator, raw_deflate)!;
+	char[]? decompressed = deflate::decompress(allocator, raw_deflate)!;
 	if (catch decompressed) {
 		return DECOMPRESSION_FAILED~;
 	}
@@ -76,7 +76,7 @@ fn char[]? decompress_zlib(char[] data, Allocator allocator) {
 	                       (uint)data[^1];
 
 	if (stored_checksum != adler32::hash(decompressed)) {
-		allocator::free(allocator, decompressed);
+		alloc::free(allocator, decompressed);
 		return DECOMPRESSION_FAILED~;
 	}
 

@@ -16,7 +16,7 @@ fn void test_encode_rgba() {
 	};
 
 	char[] encoded = png::save_bytes(&img)!!;
-	defer allocator::free(mem, encoded);
+	defer alloc::free(mem, encoded);
 
 	Image decoded = png::load_bytes(encoded)!!;
 	defer decoded.free();
@@ -45,7 +45,7 @@ fn void test_encode_rgb() {
 	};
 
 	char[] encoded = png::save_bytes(&img)!!;
-	defer allocator::free(mem, encoded);
+	defer alloc::free(mem, encoded);
 
 	Image decoded = png::load_bytes(encoded)!!;
 	defer decoded.free();
@@ -70,7 +70,7 @@ fn void test_encode_grayscale() {
 	};
 
 	char[] encoded = png::save_bytes(&img)!!;
-	defer allocator::free(mem, encoded);
+	defer alloc::free(mem, encoded);
 
 	Image decoded = png::load_bytes(encoded)!!;
 	defer decoded.free();
@@ -98,7 +98,7 @@ fn void test_encode_grayscale_alpha() {
 	};
 
 	char[] encoded = png::save_bytes(&img)!!;
-	defer allocator::free(mem, encoded);
+	defer alloc::free(mem, encoded);
 
 	Image decoded = png::load_bytes(encoded)!!;
 	defer decoded.free();
@@ -144,7 +144,7 @@ fn void test_roundtrip_existing() {
 	defer original.free();
 
 	char[] encoded = png::save_bytes(&original)!!;
-	defer allocator::free(mem, encoded);
+	defer alloc::free(mem, encoded);
 
 	Image decoded = png::load_bytes(encoded)!!;
 	defer decoded.free();
