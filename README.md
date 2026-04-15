@@ -123,7 +123,3 @@ defer tex.free();
 - No Basis Universal transcoding (BasisLZ supercompression)
 - No Zstd supercompression
 - Decode only (no encoding)
-
-## Dependencies
-
-- [`compress.c3l`](https://github.com/konimarti/compress.c3l) - For DEFLATE decompression
