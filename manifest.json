@@ -4,6 +4,7 @@
   "sources": [
     "src/ktx/**",
     "src/png/**",
+    "src/jpeg/**",
     "src/image.c3"
   ],
   "targets" : {

@@ -1,6 +1,6 @@
 # image.c3
 
-An image decoding library for C3 supporting PNG and KTX2 formats.
+An image decoding library for C3 supporting PNG, JPEG, and KTX2 formats.
 
 ## Features
 
@@ -8,6 +8,13 @@ An image decoding library for C3 supporting PNG and KTX2 formats.
 - Supports all color types: Grayscale, RGB, Indexed (palette), Grayscale+Alpha, RGBA
 - 8-bit and 16-bit bit depths
 - Indexed images are automatically expanded to RGB/RGBA
+
+### JPEG
+- Baseline JPEG (SOF0), 8-bit precision
+- Grayscale (1 component) and YCbCr (3 components, JFIF/Exif)
+- Chroma subsampling 4:4:4, 4:2:2, 4:2:0, 4:4:0
+- Restart markers (DRI / RSTn)
+- Output is RGB for color, GRAYSCALE for single-component
 
 ### KTX2
 - Khronos Texture format for GPU textures
@@ -42,6 +49,30 @@ Load from memory
 ```c3
 char[] png_data = /* ... */;
 Image img = png::load_bytes(png_data)!!;
+defer img.free();
+```
+
+### JPEG
+
+```c3
+import image::jpeg;
+
+fn void main() {
+    Image img = jpeg::load_file("photo.jpg")!!;
+    defer img.free();
+
+    io::printfn("Size: %dx%d", img.width, img.height);
+    io::printfn("Format: %s", img.format); // RGB or GRAYSCALE
+
+    char[] pixels = img.pixels;
+}
+```
+
+Load from memory
+
+```c3
+char[] jpeg_data = /* ... */;
+Image img = jpeg::load_bytes(jpeg_data)!!;
 defer img.free();
 ```
 
@@ -118,6 +149,14 @@ defer tex.free();
 ### PNG
 - No interlaced PNG support (Adam7)
 - No 1/2/4-bit depth support
+
+### JPEG
+- Baseline only (no progressive / SOF2, no arithmetic coding)
+- 8-bit precision only (no 12-bit)
+- 1 or 3 components only (no CMYK / Adobe transform)
+- Sampling factors must be 1 or 2 per axis
+- No EXIF orientation or ICC profile handling
+- Decode only (no encoding)
 
 ### KTX2
 - No Basis Universal transcoding (BasisLZ supercompression)
