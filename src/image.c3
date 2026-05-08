@@ -84,6 +84,43 @@ fn Image Image.resize(&self, uint new_width, uint new_height, Allocator allocato
 	};
 }
 
+// Returns a freshly-allocated RGBA8 byte buffer for `self`. Single-channel and
+// RGB inputs are expanded; alpha defaults to 0xff. The result is always a new
+// allocation owned by the caller — free with `alloc::free(allocator, ...)`.
+// 16-bit images are not handled here; convert to 8-bit first.
+fn char[] Image.to_rgba(&self, Allocator allocator = mem) {
+	usz pixel_count = (usz)self.width * (usz)self.height;
+	char[] result = alloc::new_array(allocator, char, pixel_count * 4);
+	switch (self.format) {
+		case RGBA:
+			mem::copy(result.ptr, self.pixels.ptr, pixel_count * 4);
+		case RGB:
+			for (usz p = 0; p < pixel_count; p++) {
+				result[p * 4 + 0] = self.pixels[p * 3 + 0];
+				result[p * 4 + 1] = self.pixels[p * 3 + 1];
+				result[p * 4 + 2] = self.pixels[p * 3 + 2];
+				result[p * 4 + 3] = (char)0xff;
+			}
+		case GRAYSCALE:
+			for (usz p = 0; p < pixel_count; p++) {
+				char g = self.pixels[p];
+				result[p * 4 + 0] = g;
+				result[p * 4 + 1] = g;
+				result[p * 4 + 2] = g;
+				result[p * 4 + 3] = (char)0xff;
+			}
+		case GRAYSCALE_ALPHA:
+			for (usz p = 0; p < pixel_count; p++) {
+				char g = self.pixels[p * 2 + 0];
+				result[p * 4 + 0] = g;
+				result[p * 4 + 1] = g;
+				result[p * 4 + 2] = g;
+				result[p * 4 + 3] = self.pixels[p * 2 + 1];
+			}
+	}
+	return result;
+}
+
 fn void Image.free(&self) {
 	if (self.pixels.len > 0 && self.allocator) {
 		alloc::free(self.allocator, self.pixels);
