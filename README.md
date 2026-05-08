@@ -150,7 +150,6 @@ defer tex.free();
 - No 1/2/4-bit depth support
 
 ### JPEG
-- Baseline only (no progressive / SOF2, no arithmetic coding)
 - 8-bit precision only (no 12-bit)
 - 1 or 3 components only (no CMYK / Adobe transform)
 - Sampling factors must be 1 or 2 per axis
