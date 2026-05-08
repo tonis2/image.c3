@@ -26,21 +26,10 @@ const char COM  = 0xFE;
 const char APP0 = 0xE0;
 const char RST0 = 0xD0;
 
-fn uint read_u16_be(char[] data) {
-	return ((uint)data[0] << 8) | (uint)data[1];
-}
-
-fn bool is_sof(char marker) {
-	return (marker >= 0xC0 && marker <= 0xCF) && marker != DHT && marker != DAC;
-}
-
-fn bool is_app_or_com(char marker) {
-	return (marker >= 0xE0 && marker <= 0xEF) || marker == COM;
-}
-
-fn bool is_rst(char marker) {
-	return marker >= RST0 && marker <= 0xD7;
-}
+fn uint read_u16_be(char[] data) =>  ((uint)data[0] << 8) | (uint)data[1];
+fn bool is_sof(char marker) => (marker >= 0xC0 && marker <= 0xCF) && marker != DHT && marker != DAC;
+fn bool is_app_or_com(char marker) => (marker >= 0xE0 && marker <= 0xEF) || marker == COM;
+fn bool is_rst(char marker) => marker >= RST0 && marker <= 0xD7;
 
 struct Segment {
 	char marker;

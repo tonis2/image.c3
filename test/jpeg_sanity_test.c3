@@ -41,3 +41,15 @@ fn void test_420_matches_djpeg() {
 fn void test_restart_matches_djpeg() {
 	check_against_ppm("test/test_rgb_restart.jpg", "test/test_rgb_restart.ppm", 64, 64);
 }
+
+fn void test_progressive_444_matches_djpeg() {
+	check_against_ppm("test/test_rgb_progressive.jpg", "test/test_rgb_progressive.ppm", 16, 16);
+}
+
+fn void test_progressive_420_matches_djpeg() {
+	check_against_ppm("test/test_rgb_420_progressive.jpg", "test/test_rgb_420_progressive.ppm", 64, 64);
+}
+
+fn void test_progressive_420_plasma_matches_djpeg() {
+	check_against_ppm("test/test_plasma_420_progressive.jpg", "test/test_plasma_420_progressive.ppm", 64, 64);
+}
