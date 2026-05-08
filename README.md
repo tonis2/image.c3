@@ -10,7 +10,6 @@ An image decoding library for C3 supporting PNG, JPEG, and KTX2 formats.
 - Indexed images are automatically expanded to RGB/RGBA
 
 ### JPEG
-- Baseline JPEG (SOF0), 8-bit precision
 - Grayscale (1 component) and YCbCr (3 components, JFIF/Exif)
 - Chroma subsampling 4:4:4, 4:2:2, 4:2:0, 4:4:0
 - Restart markers (DRI / RSTn)
