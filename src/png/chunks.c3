@@ -53,7 +53,7 @@ fn bool verify_signature(char[] data) {
 	return data[:8] == PNG_SIGNATURE[..];
 }
 
-fn Chunk? parse_chunk(char[] data, usz offset) {
+fn Chunk? parse_chunk(char[] data, sz offset) {
 	if (offset + 12 > data.len) {
 		return INCOMPLETE_DATA~;
 	}
@@ -69,7 +69,7 @@ fn Chunk? parse_chunk(char[] data, usz offset) {
 	chunk.type[..] = data[offset+4:4];
 
 	if (length > 0) {
-		chunk.data = data[offset+8:(usz)length];
+		chunk.data = data[offset+8:(sz)length];
 	} else {
 		chunk.data = {};
 	}
@@ -77,7 +77,7 @@ fn Chunk? parse_chunk(char[] data, usz offset) {
 	chunk.crc = read_u32_be(data[offset+8+length:4]);
 
 	// Verify CRC (computed over type + data)
-	char[] crc_data = data[offset+4:4+(usz)length];
+	char[] crc_data = data[offset+4:4+(sz)length];
 	uint computed_crc = crc32::hash(crc_data);
 
 	if (computed_crc != chunk.crc) {
@@ -137,4 +137,4 @@ fn IhdrData? parse_ihdr(Chunk* chunk) {
 	return ihdr;
 }
 
-fn usz Chunk.total_size(Chunk* chunk) => 12 + (usz)chunk.length; // 4 (length) + 4 (type) + data + 4 (crc)
+fn sz Chunk.total_size(Chunk* chunk) => 12 + (sz)chunk.length; // 4 (length) + 4 (type) + data + 4 (crc)

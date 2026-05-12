@@ -70,7 +70,7 @@ fn char[]? compress(Allocator allocator, char[] data) {
 	uint checksum = adler32::hash(data);
 
 	// Assemble: 2-byte header + DEFLATE data + 4-byte Adler-32
-	usz total = 2 + deflated.len + 4;
+	sz total = 2 + deflated.len + 4;
 	char[] result = alloc::new_array(allocator, char, total);
 
 	// ZLIB header: CMF=0x78 (DEFLATE, 32K window), FLG=0x01
@@ -78,7 +78,7 @@ fn char[]? compress(Allocator allocator, char[] data) {
 	result[1] = 0x01;
 
 	// Copy DEFLATE data
-	for (usz i = 0; i < deflated.len; i++) {
+	for (sz i = 0; i < deflated.len; i++) {
 		result[2 + i] = deflated[i];
 	}
 

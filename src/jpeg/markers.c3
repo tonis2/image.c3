@@ -45,7 +45,7 @@ fn bool is_rst(char marker) {
 struct Segment {
 	char marker;
 	char[] payload;
-	usz next_offset;
+	sz next_offset;
 }
 
 <*
@@ -55,8 +55,8 @@ struct Segment {
  with `payload.len == 0`. Other markers read a big-endian length and
  carve the payload slice.
 *>
-fn Segment? next_segment(char[] data, usz offset) {
-	usz i = offset;
+fn Segment? next_segment(char[] data, sz offset) {
+	sz i = offset;
 	while (i < data.len && data[i] != 0xFF) i++;
 	while (i < data.len && data[i] == 0xFF) i++;
 	if (i >= data.len) return UNEXPECTED_EOF~;
@@ -71,8 +71,8 @@ fn Segment? next_segment(char[] data, usz offset) {
 	if (i + 2 > data.len) return UNEXPECTED_EOF~;
 	uint length = read_u16_be(data[i:2]);
 	if (length < 2) return INVALID_SEGMENT~;
-	if (i + (usz)length > data.len) return UNEXPECTED_EOF~;
+	if (i + (sz)length > data.len) return UNEXPECTED_EOF~;
 
-	char[] payload = data[i + 2 : (usz)length - 2];
-	return { marker, payload, i + (usz)length };
+	char[] payload = data[i + 2 : (sz)length - 2];
+	return { marker, payload, i + (sz)length };
 }

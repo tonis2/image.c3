@@ -71,7 +71,7 @@ fn char clamp(int x) @inline {
  `coeffs` is in natural row-major order. Writes 8 rows of 8 bytes
  to `dst` starting at `dst_offset`, with `dst_stride` bytes per row.
 *>
-fn void idct_block(int* coeffs, char[] dst, usz dst_offset, usz dst_stride) {
+fn void idct_block(int* coeffs, char[] dst, sz dst_offset, sz dst_stride) {
 	int[64] val;
 
 	// Column pass: input columns of `coeffs`, output to `val`.
@@ -117,7 +117,7 @@ fn void idct_block(int* coeffs, char[] dst, usz dst_offset, usz dst_stride) {
 
 	// Row pass: input rows of `val`, output clamped bytes to `dst`.
 	for (uint i = 0; i < 8; i++) {
-		usz row = (usz)i * 8;
+		sz row = (sz)i * 8;
 		Idct1D r = idct_1d(val[row+0], val[row+1], val[row+2], val[row+3],
 		                   val[row+4], val[row+5], val[row+6], val[row+7]);
 		// Total scale: 1<<12 (constants) + 1<<2 (column pass) + sqrt(8)*sqrt(8)=8 = 1<<3 -> 1<<17.
@@ -128,7 +128,7 @@ fn void idct_block(int* coeffs, char[] dst, usz dst_offset, usz dst_stride) {
 		int x2 = r.x2 + bias;
 		int x3 = r.x3 + bias;
 
-		usz o = dst_offset + i * dst_stride;
+		sz o = dst_offset + i * dst_stride;
 		dst[o + 0] = clamp((x0 + r.t3) >> 17);
 		dst[o + 7] = clamp((x0 - r.t3) >> 17);
 		dst[o + 1] = clamp((x1 + r.t2) >> 17);

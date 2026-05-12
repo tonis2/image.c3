@@ -25,7 +25,7 @@ fn Image? load_bytes(char[] data, Allocator allocator = mem) {
 		return INVALID_SIGNATURE~;
 	}
 
-	usz offset = 8; // Skip signature
+	sz offset = 8; // Skip signature
 
 	// Parse IHDR (must be first chunk)
 	chunks::Chunk ihdr_chunk = chunks::parse_chunk(data, offset)!;
@@ -68,14 +68,14 @@ fn Image? load_bytes(char[] data, Allocator allocator = mem) {
 	defer alloc::free(allocator, decompressed);
 
 	// Calculate bytes per pixel for filter reconstruction
-	usz filter_bpp = get_filter_bytes_per_pixel(ihdr.color_type, ihdr.bit_depth);
+	sz filter_bpp = get_filter_bytes_per_pixel(ihdr.color_type, ihdr.bit_depth);
 
 	// Reconstruct filters in-place
 	filters::reconstruct(decompressed, ihdr.width, ihdr.height, filter_bpp)!;
 
 	// Determine output format and allocate output buffer
 	PixelFormat out_format;
-	usz out_bpp;
+	sz out_bpp;
 
 	if (ihdr.color_type == chunks::COLOR_TYPE_INDEXED) {
 		// Indexed will expand to RGB or RGBA
@@ -91,7 +91,7 @@ fn Image? load_bytes(char[] data, Allocator allocator = mem) {
 		out_bpp = get_output_bytes_per_pixel(ihdr.color_type, ihdr.bit_depth);
 	}
 
-	usz output_size = (usz)ihdr.width * (usz)ihdr.height * out_bpp;
+	sz output_size = (sz)ihdr.width * (sz)ihdr.height * out_bpp;
 	char[] output = alloc::new_array(allocator, char, output_size);
 
 	if (ihdr.color_type == chunks::COLOR_TYPE_INDEXED) {
@@ -124,8 +124,8 @@ fn PixelFormat color_type_to_format(char color_type) {
 	}
 }
 
-fn usz get_filter_bytes_per_pixel(char color_type, char bit_depth) {
-	usz channels;
+fn sz get_filter_bytes_per_pixel(char color_type, char bit_depth) {
+	sz channels;
 	switch (color_type) {
 		case chunks::COLOR_TYPE_GRAYSCALE: channels = 1;
 		case chunks::COLOR_TYPE_RGB: channels = 3;
@@ -134,12 +134,12 @@ fn usz get_filter_bytes_per_pixel(char color_type, char bit_depth) {
 		case chunks::COLOR_TYPE_RGBA: channels = 4;
 		default: channels = 4;
 	}
-	usz bytes_per_channel = bit_depth == 16 ? 2 : 1;
+	sz bytes_per_channel = bit_depth == 16 ? 2 : 1;
 	return channels * bytes_per_channel;
 }
 
-fn usz get_output_bytes_per_pixel(char color_type, char bit_depth) {
-	usz channels;
+fn sz get_output_bytes_per_pixel(char color_type, char bit_depth) {
+	sz channels;
 	switch (color_type) {
 		case chunks::COLOR_TYPE_GRAYSCALE: channels = 1;
 		case chunks::COLOR_TYPE_RGB: channels = 3;
@@ -147,23 +147,23 @@ fn usz get_output_bytes_per_pixel(char color_type, char bit_depth) {
 		case chunks::COLOR_TYPE_RGBA: channels = 4;
 		default: channels = 4;
 	}
-	usz bytes_per_channel = bit_depth == 16 ? 2 : 1;
+	sz bytes_per_channel = bit_depth == 16 ? 2 : 1;
 	return channels * bytes_per_channel;
 }
 
 fn void expand_indexed(char[] scanlines, char[] output, uint width, uint height, char[] palette, char[] trns) {
-	usz stride = (usz)width + 1; // 1 byte per pixel + filter byte
+	sz stride = (sz)width + 1; // 1 byte per pixel + filter byte
 	bool has_alpha = trns.len > 0;
-	usz out_bpp = has_alpha ? 4 : 3;
+	sz out_bpp = has_alpha ? 4 : 3;
 
 	for (uint y = 0; y < height; y++) {
-		usz src_row = (usz)y * stride + 1; // Skip filter byte
-		usz dst_row = (usz)y * (usz)width * out_bpp;
+		sz src_row = (sz)y * stride + 1; // Skip filter byte
+		sz dst_row = (sz)y * (sz)width * out_bpp;
 
 		for (uint x = 0; x < width; x++) {
 			char index = scanlines[src_row + x];
-			usz pal_offset = (usz)index * 3;
-			usz dst_offset = dst_row + (usz)x * out_bpp;
+			sz pal_offset = (sz)index * 3;
+			sz dst_offset = dst_row + (sz)x * out_bpp;
 
 			// Copy RGB from palette
 			if (pal_offset + 2 < palette.len) {
@@ -174,7 +174,7 @@ fn void expand_indexed(char[] scanlines, char[] output, uint width, uint height,
 
 			// Add alpha if tRNS present
 			if (has_alpha) {
-				if ((usz)index < trns.len) {
+				if ((sz)index < trns.len) {
 					output[dst_offset + 3] = trns[index];
 				} else {
 					output[dst_offset + 3] = 255;

@@ -9,7 +9,7 @@ faultdef DECOMPRESSION_FAILED,
 // Decompress level data based on supercompression scheme
 fn char[]? decompress(
 	char[] compressed_data,
-	usz uncompressed_size,
+	sz uncompressed_size,
 	uint scheme,
 	Allocator allocator
 ) {

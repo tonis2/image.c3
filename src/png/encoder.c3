@@ -11,7 +11,7 @@ fn bool validate_image_data(Image* img) {
 	if (img.pixels.len == 0) return false;
 	if (img.width == 0 || img.height == 0) return false;
 
-	usz expected = (usz)img.width * (usz)img.height * img.bytes_per_pixel();
+	sz expected = (sz)img.width * (sz)img.height * img.bytes_per_pixel();
 	if (img.pixels.len < expected) return false;
 
 	return true;
@@ -51,12 +51,12 @@ fn char[]? save_bytes(Image* img, Allocator allocator = mem, bool check_valid = 
 	ihdr_data[12] = 0; // interlace method
 
 	// Calculate total output size
-	usz total = 8 + (12 + 13) + (12 + compressed.len) + 12;
+	sz total = 8 + (12 + 13) + (12 + compressed.len) + 12;
 	char[] output = alloc::new_array(allocator, char, total);
-	usz pos = 0;
+	sz pos = 0;
 
 	// PNG signature
-	for (usz i = 0; i < 8; i++) {
+	for (sz i = 0; i < 8; i++) {
 		output[i] = chunks::PNG_SIGNATURE[i];
 	}
 	pos = 8;
@@ -84,8 +84,8 @@ fn char[]? tsave_bytes(Image* img, bool check_valid = false) => save_bytes(img, 
 
 fn void? tsave_file(Image* img, String path, bool check_valid = false) => save_file(img, path, tmem, check_valid);
 
-fn usz write_chunk(char[] buf, String chunk_type, char[] data) {
-	usz len = data.len;
+fn sz write_chunk(char[] buf, String chunk_type, char[] data) {
+	sz len = data.len;
 
 	// Length (big-endian)
 	buf[0] = (char)((uint)len >> 24);
@@ -100,7 +100,7 @@ fn usz write_chunk(char[] buf, String chunk_type, char[] data) {
 	buf[7] = chunk_type[3];
 
 	// Data
-	for (usz i = 0; i < len; i++) {
+	for (sz i = 0; i < len; i++) {
 		buf[8 + i] = data[i];
 	}
 
@@ -124,19 +124,19 @@ fn char format_to_color_type(PixelFormat format) {
 }
 
 fn char[] apply_filter_none(Allocator allocator, Image* img) {
-	usz bpp = img.bytes_per_pixel();
-	usz row_bytes = (usz)img.width * bpp;
-	usz filtered_size = (usz)img.height * (row_bytes + 1);
+	sz bpp = img.bytes_per_pixel();
+	sz row_bytes = (sz)img.width * bpp;
+	sz filtered_size = (sz)img.height * (row_bytes + 1);
 
 	char[] filtered = alloc::new_array(allocator, char, filtered_size);
 
 	for (uint y = 0; y < img.height; y++) {
-		usz src_offset = (usz)y * row_bytes;
-		usz dst_offset = (usz)y * (row_bytes + 1);
+		sz src_offset = (sz)y * row_bytes;
+		sz dst_offset = (sz)y * (row_bytes + 1);
 
 		filtered[dst_offset] = 0; // Filter type: None
 
-		for (usz i = 0; i < row_bytes; i++) {
+		for (sz i = 0; i < row_bytes; i++) {
 			filtered[dst_offset + 1 + i] = img.pixels[src_offset + i];
 		}
 	}

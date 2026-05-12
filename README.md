@@ -123,7 +123,7 @@ fn void upload_to_vulkan() {
     uint block_size = img.block_size();             // bytes per block
 
     // Calculate buffer size for Vulkan
-    usz data_size = img.calculate_level_size(0);
+    sz data_size = img.calculate_level_size(0);
 
     // The vk_format can be cast directly to VkFormat
     VkFormat format = (VkFormat)img.vk_format;

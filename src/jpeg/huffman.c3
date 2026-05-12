@@ -35,14 +35,14 @@ struct HuffmanTable {
 fn void? HuffmanTable.build(&self, char[] bits, char[] values) {
 	if (bits.len < 16) return INVALID_HUFFMAN_TABLE~;
 
-	usz total = 0;
-	for (uint i = 0; i < 16; i++) total += (usz)bits[i];
+	sz total = 0;
+	for (uint i = 0; i < 16; i++) total += (sz)bits[i];
 	if (total > 256 || total > values.len) return INVALID_HUFFMAN_TABLE~;
 
 	*self = {};
 	self.defined = true;
 	self.num_values = (int)total;
-	for (usz i = 0; i < total; i++) self.values[i] = values[i];
+	for (sz i = 0; i < total; i++) self.values[i] = values[i];
 
 	// Initialize fast lookup to "empty" sentinel.
 	for (uint i = 0; i < FAST_SIZE; i++) self.fast[i] = FAST_EMPTY;
@@ -83,14 +83,14 @@ fn void? HuffmanTable.build(&self, char[] bits, char[] values) {
 
 struct BitReader {
 	char[] data;
-	usz pos;
+	sz pos;
 	ulong buf;        // MSB-aligned 64-bit shift register
 	int  bits;        // valid bit count in buf, top-aligned
 	bool marker_seen; // true once a non-stuffed 0xFF<xx> appears
 	char marker;      // the marker byte (xx) once marker_seen
 }
 
-fn void BitReader.init(&self, char[] data, usz pos) {
+fn void BitReader.init(&self, char[] data, sz pos) {
 	*self = { .data = data, .pos = pos };
 }
 

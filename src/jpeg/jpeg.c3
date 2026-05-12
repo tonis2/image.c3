@@ -19,7 +19,7 @@ faultdef INVALID_SIGNATURE,
          INVALID_DRI,
          INVALID_SOF;
 
-const usz MAX_COMPONENTS = 3;
+const sz MAX_COMPONENTS = 3;
 
 struct Component {
 	char id;
@@ -75,9 +75,9 @@ fn Image? load_bytes(char[] data, Allocator allocator = mem) {
 	JpegState state;
 	state.allocator = allocator;
 
-	usz offset = 2;
+	sz offset = 2;
 	bool sos_seen = false;
-	usz sos_data_offset = 0;
+	sz sos_data_offset = 0;
 
 	while (offset < data.len && !sos_seen) {
 		markers::Segment seg = markers::next_segment(data, offset)!;
@@ -117,11 +117,11 @@ fn Image? load_bytes(char[] data, Allocator allocator = mem) {
 	decode_scan(&state, data, sos_data_offset)!;
 
 	bool is_color = state.num_components == 3;
-	usz out_size = (usz)state.width * (usz)state.height * (is_color ? 3 : 1);
+	sz out_size = (sz)state.width * (sz)state.height * (is_color ? 3 : 1);
 	char[] output = alloc::new_array(allocator, char, out_size);
 
 	if (is_color) {
-		usz plane_size = (usz)state.width * (usz)state.height;
+		sz plane_size = (sz)state.width * (sz)state.height;
 		char[] y_full  = alloc::new_array(allocator, char, plane_size);
 		char[] cb_full = alloc::new_array(allocator, char, plane_size);
 		char[] cr_full = alloc::new_array(allocator, char, plane_size);
@@ -137,8 +137,8 @@ fn Image? load_bytes(char[] data, Allocator allocator = mem) {
 	} else {
 		Component* c = &state.comp[0];
 		for (uint y = 0; y < state.height; y++) {
-			usz src = (usz)y * (usz)c.stride;
-			usz dst = (usz)y * (usz)state.width;
+			sz src = (sz)y * (sz)c.stride;
+			sz dst = (sz)y * (sz)state.width;
 			for (uint x = 0; x < state.width; x++) {
 				output[dst + x] = c.plane[src + x];
 			}
@@ -156,7 +156,7 @@ fn Image? load_bytes(char[] data, Allocator allocator = mem) {
 }
 
 fn void? parse_dqt(JpegState* s, char[] payload) {
-	usz i = 0;
+	sz i = 0;
 	while (i < payload.len) {
 		if (i + 1 > payload.len) return INVALID_QUANT_TABLE~;
 		char pq_tq = payload[i];
@@ -176,7 +176,7 @@ fn void? parse_dqt(JpegState* s, char[] payload) {
 }
 
 fn void? parse_dht(JpegState* s, char[] payload) {
-	usz i = 0;
+	sz i = 0;
 	while (i < payload.len) {
 		if (i + 17 > payload.len) return INVALID_HUFFMAN_TABLE~;
 		char tc_th = payload[i];
@@ -190,9 +190,9 @@ fn void? parse_dht(JpegState* s, char[] payload) {
 
 		uint total = 0;
 		for (uint k = 0; k < 16; k++) total += (uint)bits[k];
-		if (i + (usz)total > payload.len) return INVALID_HUFFMAN_TABLE~;
-		char[] values = payload[i : (usz)total];
-		i += (usz)total;
+		if (i + (sz)total > payload.len) return INVALID_HUFFMAN_TABLE~;
+		char[] values = payload[i : (sz)total];
+		i += (sz)total;
 
 		if (tc == 0) {
 			s.huff_dc[th].build(bits, values)!;
@@ -212,7 +212,7 @@ fn void? parse_sof0(JpegState* s, char[] payload) {
 	uint nf = (uint)payload[5];
 	if (w == 0 || h == 0) return INVALID_SOF~;
 	if (nf != 1 && nf != 3) return INVALID_COMPONENT_COUNT~;
-	if (payload.len < 6 + 3 * nf) return INVALID_SOF~;
+	if (payload.len < (sz)(6 + 3 * nf)) return INVALID_SOF~;
 
 	s.width = w;
 	s.height = h;
@@ -221,7 +221,7 @@ fn void? parse_sof0(JpegState* s, char[] payload) {
 	int max_h = 1;
 	int max_v = 1;
 	for (uint c = 0; c < nf; c++) {
-		usz off = 6 + (usz)c * 3;
+		sz off = 6 + (sz)c * 3;
 		char id = payload[off];
 		char hv = payload[off + 1];
 		char tq = payload[off + 2];
@@ -250,10 +250,10 @@ fn void? parse_sos(JpegState* s, char[] payload) {
 	if (payload.len < 1) return INVALID_SOS~;
 	uint ns = (uint)payload[0];
 	if ((int)ns != s.num_components) return INVALID_SOS~;
-	if (payload.len < 1 + 2 * ns + 3) return INVALID_SOS~;
+	if (payload.len < (sz)(1 + 2 * ns + 3)) return INVALID_SOS~;
 
 	for (uint k = 0; k < ns; k++) {
-		usz off = 1 + (usz)k * 2;
+		sz off = 1 + (sz)k * 2;
 		char cs = payload[off];
 		char td_ta = payload[off + 1];
 		char td = (char)(td_ta >> 4);
@@ -271,7 +271,7 @@ fn void? parse_sos(JpegState* s, char[] payload) {
 		s.comp[ci].dc_pred = 0;
 	}
 
-	usz tail = 1 + (usz)ns * 2;
+	sz tail = 1 + (sz)ns * 2;
 	char ss = payload[tail];
 	char se = payload[tail + 1];
 	char ah_al = payload[tail + 2];
@@ -288,7 +288,7 @@ fn void? allocate_planes(JpegState* s) {
 		cm.plane_h = plane_h;
 		cm.width  = (s.width  * (uint)cm.h_samp + (uint)s.max_h - 1) / (uint)s.max_h;
 		cm.height = (s.height * (uint)cm.v_samp + (uint)s.max_v - 1) / (uint)s.max_v;
-		cm.plane = alloc::new_array(s.allocator, char, (usz)stride * (usz)plane_h);
+		cm.plane = alloc::new_array(s.allocator, char, (sz)stride * (sz)plane_h);
 	}
 	return;
 }
@@ -302,7 +302,7 @@ fn void free_planes(JpegState* s) {
 	}
 }
 
-fn void? decode_scan(JpegState* s, char[] data, usz start_offset) {
+fn void? decode_scan(JpegState* s, char[] data, sz start_offset) {
 	huffman::BitReader br;
 	br.init(data, start_offset);
 
@@ -325,10 +325,10 @@ fn void? decode_scan(JpegState* s, char[] data, usz start_offset) {
 						huffman::decode_block(&br, dc, ac, &coeffs[0], &cm.dc_pred)!;
 						for (uint k = 0; k < 64; k++) coeffs[k] *= qt.table[k];
 
-						usz row_y = (usz)((my * (uint)cm.v_samp + vy) * 8);
-						usz col_x = (usz)((mx * (uint)cm.h_samp + vx) * 8);
-						usz dst_offset = row_y * (usz)cm.stride + col_x;
-						idct::idct_block(&coeffs[0], cm.plane, dst_offset, (usz)cm.stride);
+						sz row_y = (sz)((my * (uint)cm.v_samp + vy) * 8);
+						sz col_x = (sz)((mx * (uint)cm.h_samp + vx) * 8);
+						sz dst_offset = row_y * (sz)cm.stride + col_x;
+						idct::idct_block(&coeffs[0], cm.plane, dst_offset, (sz)cm.stride);
 					}
 				}
 			}
@@ -378,8 +378,8 @@ fn void upsample_to_full(JpegState* s, uint c_idx, char[] dst) {
 	for (uint y = 0; y < h; y++) {
 		uint sy = y * vs / mv;
 		if (sy >= c.height) sy = c.height - 1;
-		usz src_row = (usz)sy * (usz)c.stride;
-		usz dst_row = (usz)y * (usz)w;
+		sz src_row = (sz)sy * (sz)c.stride;
+		sz dst_row = (sz)y * (sz)w;
 		for (uint x = 0; x < w; x++) {
 			uint sx = x * hs / mh;
 			if (sx >= c.width) sx = c.width - 1;

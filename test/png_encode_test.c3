@@ -26,7 +26,7 @@ fn void test_encode_rgba() {
 	assert(decoded.bit_depth == 8);
 	assert(decoded.format == RGBA);
 	assert(decoded.pixels.len == 16);
-	for (usz i = 0; i < decoded.pixels.len; i++) {
+	for (sz i = 0; i < decoded.pixels.len; i++) {
 		assert(decoded.pixels[i] == pixels[i]);
 	}
 }
@@ -54,7 +54,7 @@ fn void test_encode_rgb() {
 	assert(decoded.height == 2);
 	assert(decoded.format == RGB);
 	assert(decoded.pixels.len == 12);
-	for (usz i = 0; i < decoded.pixels.len; i++) {
+	for (sz i = 0; i < decoded.pixels.len; i++) {
 		assert(decoded.pixels[i] == pixels[i]);
 	}
 }
@@ -79,7 +79,7 @@ fn void test_encode_grayscale() {
 	assert(decoded.height == 2);
 	assert(decoded.format == GRAYSCALE);
 	assert(decoded.pixels.len == 4);
-	for (usz i = 0; i < decoded.pixels.len; i++) {
+	for (sz i = 0; i < decoded.pixels.len; i++) {
 		assert(decoded.pixels[i] == pixels[i]);
 	}
 }
@@ -107,7 +107,7 @@ fn void test_encode_grayscale_alpha() {
 	assert(decoded.height == 2);
 	assert(decoded.format == GRAYSCALE_ALPHA);
 	assert(decoded.pixels.len == 8);
-	for (usz i = 0; i < decoded.pixels.len; i++) {
+	for (sz i = 0; i < decoded.pixels.len; i++) {
 		assert(decoded.pixels[i] == pixels[i]);
 	}
 }
@@ -134,7 +134,7 @@ fn void test_save_file() {
 	assert(decoded.height == 2);
 	assert(decoded.format == RGBA);
 	assert(decoded.pixels.len == 16);
-	for (usz i = 0; i < decoded.pixels.len; i++) {
+	for (sz i = 0; i < decoded.pixels.len; i++) {
 		assert(decoded.pixels[i] == pixels[i]);
 	}
 }
@@ -154,7 +154,7 @@ fn void test_roundtrip_existing() {
 	assert(decoded.bit_depth == original.bit_depth);
 	assert(decoded.format == original.format);
 	assert(decoded.pixels.len == original.pixels.len);
-	for (usz i = 0; i < decoded.pixels.len; i++) {
+	for (sz i = 0; i < decoded.pixels.len; i++) {
 		assert(decoded.pixels[i] == original.pixels[i]);
 	}
 }

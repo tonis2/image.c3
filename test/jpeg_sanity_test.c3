@@ -11,7 +11,7 @@ macro check_against_ppm($jpg, $ppm, $w, $h) {
 
 	char[] ppm = file::load(tmem, $ppm)!!;
 	int newlines = 0;
-	usz i = 0;
+	sz i = 0;
 	while (i < ppm.len && newlines < 3) {
 		if (ppm[i] == '\n') newlines++;
 		i++;
@@ -20,7 +20,7 @@ macro check_against_ppm($jpg, $ppm, $w, $h) {
 
 	assert(ref_pixels.len == img.pixels.len);
 	uint mismatches = 0;
-	for (usz k = 0; k < img.pixels.len; k++) {
+	for (sz k = 0; k < img.pixels.len; k++) {
 		int a = (int)img.pixels[k];
 		int b = (int)ref_pixels[k];
 		int d = a > b ? a - b : b - a;

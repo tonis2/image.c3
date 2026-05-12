@@ -52,14 +52,14 @@ fn bool verify_identifier(char[] data) {
 	return true;
 }
 
-fn uint read_u32(char[] data, usz offset) {
+fn uint read_u32(char[] data, sz offset) {
 	return ((uint)data[offset]) |
 	       ((uint)data[offset + 1] << 8) |
 	       ((uint)data[offset + 2] << 16) |
 	       ((uint)data[offset + 3] << 24);
 }
 
-fn ulong read_u64(char[] data, usz offset) {
+fn ulong read_u64(char[] data, sz offset) {
 	return ((ulong)data[offset]) |
 	       ((ulong)data[offset + 1] << 8) |
 	       ((ulong)data[offset + 2] << 16) |
@@ -76,7 +76,7 @@ fn Header? parse_header(char[] data) {
 		return INVALID_HEADER~;
 	}
 
-	usz o = 12; // Skip identifier
+	sz o = 12; // Skip identifier
 
 	Header header = {
 		.vk_format = read_u32(data, o),
@@ -112,8 +112,8 @@ fn Header? parse_header(char[] data) {
 
 fn LevelIndex[]? parse_level_index(char[] data, uint level_count, Allocator allocator) {
 	// Level index starts immediately after the 80-byte header
-	usz level_index_offset = 80;
-	usz level_index_size = (usz)level_count * 24; // 24 bytes per level
+	sz level_index_offset = 80;
+	sz level_index_size = (sz)level_count * 24; // 24 bytes per level
 
 	if (data.len < level_index_offset + level_index_size) {
 		return INVALID_LEVEL_INDEX~;
@@ -122,7 +122,7 @@ fn LevelIndex[]? parse_level_index(char[] data, uint level_count, Allocator allo
 	LevelIndex[] levels = alloc::new_array(allocator, LevelIndex, level_count);
 
 	for (uint i = 0; i < level_count; i++) {
-		usz o = level_index_offset + (usz)i * 24;
+		sz o = level_index_offset + (sz)i * 24;
 		levels[i] = {
 			.byte_offset = read_u64(data, o),
 			.byte_length = read_u64(data, o + 8),

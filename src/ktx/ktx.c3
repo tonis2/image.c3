@@ -62,14 +62,14 @@ fn KtxImage? load_bytes(char[] data, Allocator allocator = mem) {
 
 		// Extract compressed/raw data for this level
 		// Note: C3 slices are inclusive on both ends, so [a..b] gives length b-a+1
-		usz start = (usz)idx.byte_offset;
-		usz end = start + (usz)idx.byte_length - 1;
+		sz start = (sz)idx.byte_offset;
+		sz end = start + (sz)idx.byte_length - 1;
 		char[] level_data = data[start..end];
 
 		// Decompress if needed
 		char[]? decompressed = supercompression::decompress(
 			level_data,
-			(usz)idx.uncompressed_byte_length,
+			(sz)idx.uncompressed_byte_length,
 			hdr.supercompression_scheme,
 			allocator
 		);
@@ -166,7 +166,7 @@ fn uint KtxImage.block_size(&self) {
 }
 
 // Calculate expected data size for a mip level
-fn usz KtxImage.calculate_level_size(&self, uint level) {
+fn sz KtxImage.calculate_level_size(&self, uint level) {
 	if (level >= self.mip_levels) return 0;
 	MipLevel* mip = &self.levels[level];
 	return calculate_image_size(self.vk_format, mip.width, mip.height);
@@ -269,7 +269,7 @@ fn uint get_block_size(uint vk_format) {
 }
 
 // Calculate image data size in bytes
-fn usz calculate_image_size(uint vk_format, uint width, uint height) {
+fn sz calculate_image_size(uint vk_format, uint width, uint height) {
 	uint[<2>] block_dim = get_block_dimensions(vk_format);
 	uint block_size = get_block_size(vk_format);
 
@@ -277,7 +277,7 @@ fn usz calculate_image_size(uint vk_format, uint width, uint height) {
 	uint blocks_x = (width + block_dim[0] - 1) / block_dim[0];
 	uint blocks_y = (height + block_dim[1] - 1) / block_dim[1];
 
-	return (usz)blocks_x * (usz)blocks_y * (usz)block_size;
+	return (sz)blocks_x * (sz)blocks_y * (sz)block_size;
 }
 
 // ============================================================================
