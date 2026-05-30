@@ -5,6 +5,7 @@ import image::jpeg::huffman;
 import image::jpeg::idct;
 import image::jpeg::ycbcr;
 import std::io::file;
+import std::math;
 
 faultdef
 	INVALID_SIGNATURE, UNSUPPORTED_MARKER, UNSUPPORTED_SOF, INVALID_QUANT_TABLE, INVALID_HUFFMAN_TABLE, INVALID_SOS, UNEXPECTED_EOF, INVALID_COMPONENT_COUNT, UNSUPPORTED_SAMPLING, INVALID_BITSTREAM, INVALID_DRI, INVALID_SOF
@@ -93,7 +94,7 @@ fn Image? load_bytes(char[] data, Allocator allocator = mem)
 	state.allocator = allocator;
 	defer state.free_buffers();
 
-	sz offset    = 2;
+	sz offset     = 2;
 	bool sof_seen = false;
 	bool eoi_seen = false;
 
@@ -230,7 +231,7 @@ fn void? JpegState.parse_sof(&self, char[] payload, bool progressive)
 	int max_v = 1;
 	for (uint c = 0; c < nf; c++)
 	{
-		sz off = 6 + (sz)c * 3;
+		sz off  = 6 + (sz)c * 3;
 		char hv = payload[off + 1];
 		char hs = (char)(hv >> 4);
 		char vs = (char)(hv & 0x0F);
@@ -242,8 +243,8 @@ fn void? JpegState.parse_sof(&self, char[] payload, bool progressive)
 		self.comp[c].h_samp = hs;
 		self.comp[c].v_samp = vs;
 		self.comp[c].quant_id = tq;
-		if ((int)hs > max_h) max_h = (int)hs;
-		if ((int)vs > max_v) max_v = (int)vs;
+		max_h = math::max(max_h, (int)hs);
+		max_v = math::max(max_v, (int)vs);
 	}
 	self.max_h = max_h;
 	self.max_v = max_v;
@@ -289,7 +290,7 @@ fn ScanInfo? JpegState.parse_sos(&self, char[] payload)
 		self.comp[ci].dc_pred = 0;
 	}
 
-	sz tail   = 1 + (sz)ns * 2;
+	sz tail    = 1 + (sz)ns * 2;
 	uint ss    = (uint)payload[tail];
 	uint se    = (uint)payload[tail + 1];
 	char ah_al = payload[tail + 2];
@@ -339,7 +340,7 @@ fn void JpegState.allocate_coeffs(&self)
 	for (uint c = 0; c < (uint)self.num_components; c++)
 	{
 		Component* cm = &self.comp[c];
-		sz total     = (sz)cm.cols_blocks * (sz)cm.rows_blocks * 64;
+		sz total      = (sz)cm.cols_blocks * (sz)cm.rows_blocks * 64;
 		cm.coeffs = alloc::new_array(self.allocator, int, total);
 	}
 }
@@ -359,6 +360,14 @@ fn void JpegState.free_buffers(&self)
 			self.comp[c].coeffs = { };
 		}
 	}
+}
+
+// Dequantize a block (natural row-major order) and inverse-DCT it into the plane.
+fn void dequant_idct(QuantTable* qt, int* coeffs, char[] plane, sz offset, sz stride)
+{
+	int[64] block;
+	for (uint i = 0; i < 64; i++) block[i] = coeffs[i] * qt.table[i];
+	idct::idct_block(&block[0], plane, offset, stride);
 }
 
 // --- Baseline scan (single SOS, full 0..63 with no successive approximation) ---
@@ -391,11 +400,10 @@ fn sz? JpegState.decode_baseline_scan(&self, ScanInfo* scan, char[] data, sz sta
 					{
 						int[64] coeffs;
 						huffman::decode_block(&br, dc, ac, &coeffs[0], &cm.dc_pred)!;
-						for (uint i = 0; i < 64; i++) coeffs[i] *= qt.table[i];
 
 						sz row_y = (sz)((my * (uint)cm.v_samp + vy) * 8);
 						sz col_x = (sz)((mx * (uint)cm.h_samp + vx) * 8);
-						idct::idct_block(&coeffs[0], cm.plane, row_y * (sz)cm.stride + col_x, (sz)cm.stride);
+						dequant_idct(qt, &coeffs[0], cm.plane, row_y * (sz)cm.stride + col_x, (sz)cm.stride);
 					}
 				}
 			}
@@ -741,13 +749,10 @@ fn void? JpegState.finalize_progressive(&self)
 		{
 			for (uint bx = 0; bx < cm.cols_blocks; bx++)
 			{
-				int[64] tmp;
 				int* src = &cm.coeffs[((sz)by * cm.cols_blocks + bx) * 64];
-				for (uint k = 0; k < 64; k++) tmp[k] = src[k] * qt.table[k];
-
 				sz row_y = (sz)by * 8;
 				sz col_x = (sz)bx * 8;
-				idct::idct_block(&tmp[0], cm.plane, row_y * (sz)cm.stride + col_x, (sz)cm.stride);
+				dequant_idct(qt, src, cm.plane, row_y * (sz)cm.stride + col_x, (sz)cm.stride);
 			}
 		}
 	}
@@ -757,10 +762,10 @@ fn void? JpegState.finalize_progressive(&self)
 
 fn Image? JpegState.compose_image(&self)
 {
-	bool is_color   = self.num_components == 3;
+	bool is_color  = self.num_components == 3;
 	sz pixel_count = (sz)self.width * (sz)self.height;
 	sz out_size    = pixel_count * (is_color ? 3 : 1);
-	char[] output   = alloc::new_array(self.allocator, char, out_size);
+	char[] output  = alloc::new_array(self.allocator, char, out_size);
 
 	if (is_color)
 	{
@@ -784,10 +789,7 @@ fn Image? JpegState.compose_image(&self)
 		{
 			sz src = (sz)y * (sz)c.stride;
 			sz dst = (sz)y * (sz)self.width;
-			for (uint x = 0; x < self.width; x++)
-			{
-				output[dst + x] = c.plane[src + x];
-			}
+			mem::copy(&output[dst], &c.plane[src], (sz)self.width);
 		}
 	}
 

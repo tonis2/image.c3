@@ -1,4 +1,5 @@
 module image::jpeg::idct;
+import std::math;
 
 // Integer IDCT, AAN-style "islow" reference. Constants pre-scaled by 4096.
 // Adapted from the public-domain stb_image idct_block.
@@ -60,11 +61,7 @@ fn Idct1D idct_1d(int s0, int s1, int s2, int s3, int s4, int s5, int s6, int s7
 	return { x0, x1, x2, x3, t0, t1, tt2, tt3 };
 }
 
-fn char clamp(int x) @inline {
-	if (x < 0) return 0;
-	if (x > 255) return 255;
-	return (char)x;
-}
+fn char clamp(int x) @inline => (char)math::clamp(x, 0, 255);
 
 <*
  Inverse 8x8 DCT with level shift (+128) and clamp [0,255].

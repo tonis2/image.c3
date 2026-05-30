@@ -26,12 +26,13 @@ const char COM  = 0xFE;
 const char APP0 = 0xE0;
 const char RST0 = 0xD0;
 
-fn uint read_u16_be(char[] data) =>  ((uint)data[0] << 8) | (uint)data[1];
+fn uint read_u16_be(char[] data) => ((uint)data[0] << 8) | (uint)data[1];
 fn bool is_sof(char marker) => (marker >= 0xC0 && marker <= 0xCF) && marker != DHT && marker != DAC;
 fn bool is_app_or_com(char marker) => (marker >= 0xE0 && marker <= 0xEF) || marker == COM;
 fn bool is_rst(char marker) => marker >= RST0 && marker <= 0xD7;
 
-struct Segment {
+struct Segment
+{
 	char marker;
 	char[] payload;
 	sz next_offset;
@@ -44,7 +45,8 @@ struct Segment {
  with `payload.len == 0`. Other markers read a big-endian length and
  carve the payload slice.
 *>
-fn Segment? next_segment(char[] data, sz offset) {
+fn Segment? next_segment(char[] data, sz offset)
+{
 	sz i = offset;
 	while (i < data.len && data[i] != 0xFF) i++;
 	while (i < data.len && data[i] == 0xFF) i++;
@@ -53,8 +55,9 @@ fn Segment? next_segment(char[] data, sz offset) {
 	char marker = data[i];
 	i++;
 
-	if (marker == SOI || marker == EOI || is_rst(marker) || marker == 0x01) {
-		return { marker, {}, i };
+	if (marker == SOI || marker == EOI || is_rst(marker) || marker == 0x01)
+	{
+		return { marker, { }, i };
 	}
 
 	if (i + 2 > data.len) return UNEXPECTED_EOF~;
@@ -62,6 +65,6 @@ fn Segment? next_segment(char[] data, sz offset) {
 	if (length < 2) return INVALID_SEGMENT~;
 	if (i + (sz)length > data.len) return UNEXPECTED_EOF~;
 
-	char[] payload = data[i + 2 : (sz)length - 2];
+	char[] payload = data[i + 2:(sz)length - 2];
 	return { marker, payload, i + (sz)length };
 }
