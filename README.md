@@ -1,6 +1,7 @@
 # image.c3
 
-An image decoding library for C3 supporting PNG, JPEG, and KTX2 formats.
+An image decoding library for C3 supporting PNG and JPEG formats.
+
 
 ## Features
 
@@ -14,13 +15,6 @@ An image decoding library for C3 supporting PNG, JPEG, and KTX2 formats.
 - Chroma subsampling 4:4:4, 4:2:2, 4:2:0, 4:4:0
 - Restart markers (DRI / RSTn)
 - Output is RGB for color, GRAYSCALE for single-component
-
-### KTX2
-- Khronos Texture format for GPU textures
-- Mipmap support
-- Supercompression: None, ZLIB
-- Pass-through for GPU-compressed formats (ASTC, BC, ETC2)
-- Direct VkFormat values for Vulkan integration
 
 ## Usage
 
@@ -75,74 +69,6 @@ Image img = jpeg::load_bytes(jpeg_data)!!;
 defer img.free();
 ```
 
-### KTX2
-
-```c3
-import image::ktx;
-
-fn void main() {
-    KtxImage img = ktx::load_file("texture.ktx2")!!;
-    defer img.free();
-
-    io::printfn("Size: %dx%d", img.width, img.height);
-    io::printfn("VkFormat: %d", img.vk_format);
-    io::printfn("Mip levels: %d", img.mip_levels);
-
-    // Access base mip level
-    MipLevel* level = img.get_level(0);
-    char[] data = level.data;
-
-    // Check if GPU-compressed (ASTC/BC/ETC2)
-    if (img.is_gpu_compressed()) {
-        // Pass data directly to Vulkan
-    }
-}
-```
-
-### GPU Compressed Formats
-
-The library supports loading GPU-compressed textures that can be uploaded directly to Vulkan without CPU-side decoding:
-
-| Format | Use Case | VkFormat Range |
-|--------|----------|----------------|
-| BC1-BC7 | Desktop GPUs (NVIDIA, AMD, Intel) | 131-146 |
-| ETC2/EAC | Android, OpenGL ES 3.0+ | 147-158 |
-| ASTC | Modern mobile, Apple Silicon | 159-184 |
-
-```c3
-import image::ktx;
-
-fn void upload_to_vulkan() {
-    KtxImage img = ktx::load_file("texture.ktx2")!!;
-    defer img.free();
-
-    // Get compression info
-    CompressionType comp = img.compression_type();  // BC, ETC2, ASTC, or NONE
-    uint[<2>] block_dim = img.block_dimensions();   // e.g., {4, 4}
-    uint block_size = img.block_size();             // bytes per block
-
-    // Calculate buffer size for Vulkan
-    sz data_size = img.calculate_level_size(0);
-
-    // The vk_format can be cast directly to VkFormat
-    VkFormat format = (VkFormat)img.vk_format;
-
-    // Upload each mip level
-    for (uint i = 0; i < img.mip_levels; i++) {
-        MipLevel* mip = img.get_level(i);
-        // mip.data contains compressed blocks ready for GPU
-    }
-}
-```
-
-Load from memory
-
-```c3
-char[] ktx_data = /* ... */;
-KtxImage tex = ktx::load_bytes(ktx_data)!!;
-defer tex.free();
-```
-
 ## Limitations
 
 ### PNG
@@ -156,7 +82,7 @@ defer tex.free();
 - No EXIF orientation or ICC profile handling
 - Decode only (no encoding)
 
-### KTX2
-- No Basis Universal transcoding (BasisLZ supercompression)
-- No Zstd supercompression
-- Decode only (no encoding)
+---
+
+> **KTX2 / GPU textures** KTX2 support has moved to its own library:
+> [tonis2/ktx.c3](https://github.com/tonis2/ktx.c3)
