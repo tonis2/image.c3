@@ -30,24 +30,6 @@ struct Video
 	h264::Picture* current;
 }
 
-// A sentence for a fault from `open` or `frame`; "" for one that isn't the video's.
-fn String reason(fault f)
-{
-	if (f == h264::CABAC || f == h264::B_SLICES || f == h264::TRANSFORM_8X8 || f == h264::SCALING_LISTS || f == h264::WEIGHTED)
-	{
-		return "High-profile H.264 (CABAC, B-frames) isn't read yet: export the video as H.264 Baseline";
-	}
-	if (f == h264::INTERLACED) return "interlaced H.264 isn't read";
-	if (f == h264::SAMPLING) return "only 8-bit 4:2:0 H.264 is read";
-	if (f == h264::SLICE_GROUPS || f == h264::UNSUPPORTED) return "this H.264 uses a feature that isn't read";
-	if (f == NOT_H264) return "only H.264 video is read (not HEVC, AV1 or VP9)";
-	if (f == NO_VIDEO) return "the file has no video track";
-	if (f == NOT_MP4) return "not an MP4 or MOV file";
-	if (f == NO_FRAME) return "no such frame";
-	if (f == CORRUPT || f == h264::CORRUPT || f == h264::NO_PARAMETERS) return "the video is damaged";
-	return "";
-}
-
 fn uint be32(char[] d, usz at) @inline => (uint)d[at] << 24 | (uint)d[at + 1] << 16 | (uint)d[at + 2] << 8 | (uint)d[at + 3];
 fn ulong be64(char[] d, usz at) @inline => (ulong)be32(d, at) << 32 | be32(d, at + 4);
 

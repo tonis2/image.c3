@@ -97,7 +97,6 @@ fn void mp4_high_profile_is_refused()
 	if (catch err = mp4::open("test/high_64x48.mp4"))
 	{
 		assert(err == h264::CABAC || err == h264::B_SLICES || err == h264::TRANSFORM_8X8, "refused with %s", err);
-		assert(mp4::reason(err).starts_with("High-profile"));
 		return;
 	}
 	assert(false, "a High-profile stream opened");
