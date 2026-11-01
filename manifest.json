@@ -4,6 +4,8 @@
   "sources": [
     "src/png/**",
     "src/jpeg/**",
+    "src/h264/**",
+    "src/mp4/**",
     "src/image.c3"
   ],
   "targets" : {
