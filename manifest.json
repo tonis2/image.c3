@@ -1,6 +1,7 @@
 {
   "provides" : "image",
   "dependencies": [],
+  "version": "0.0.6",
   "sources": [
     "src/png/**",
     "src/jpeg/**",
