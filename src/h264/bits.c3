@@ -2,14 +2,14 @@ module image::h264;
 import std::collections::list;
 
 // An RBSP's bits, most significant first; reads past the end give zeros.
-struct Bits
+struct Bits @private
 {
 	char[] data;
 	usz pos;  // bits read
 	usz end;  // the rbsp_stop_one_bit's position
 }
 
-fn Bits bits_of(char[] data)
+fn Bits bits_of(char[] data) @private
 {
 	Bits b = { .data = data };
 	usz n = data.len;
@@ -22,23 +22,30 @@ fn Bits bits_of(char[] data)
 	return b;
 }
 
-// The next n bits (n <= 25), not consumed.
+<*
+ The next n bits, not consumed.
+
+ @require n >= 1 && n <= 25 : "peek reads 1 to 25 bits"
+*>
 fn uint Bits.peek(&self, uint n) @inline
 {
 	usz at = self.pos >> 3;
 	uint v;
 	if (at + 4 <= self.data.len)
 	{
-		v = (uint)self.data[at] << 24 | (uint)self.data[at + 1] << 16 | (uint)self.data[at + 2] << 8 | (uint)self.data[at + 3];
+		v = bitorder::read(self.data[at:4], UIntBE);
 	}
 	else
 	{
 		for (usz i = 0; i < 4; i++) v = v << 8 | (at + i < self.data.len ? (uint)self.data[at + i] : 0);
 	}
-	v <<= (uint)(self.pos & 7);
+	v <<= self.pos & 7;
 	return v >> (32 - n);
 }
 
+<*
+ @require n <= 32 : "u reads at most 32 bits"
+*>
 fn uint Bits.u(&self, uint n)
 {
 	if (n == 0) return 0;
@@ -63,9 +70,9 @@ fn void Bits.skip(&self, uint n) @inline
 fn uint Bits.ue(&self)
 {
 	uint zeros;
-	if (self.peek(16) != 0)
+	uint v = self.peek(16);
+	if (v != 0)
 	{
-		uint v = self.peek(16);
 		while ((v & 0x8000) == 0)
 		{
 			zeros++;
@@ -94,7 +101,7 @@ fn bool Bits.more_data(&self) => self.pos < self.end;
 fn bool Bits.overrun(&self) => self.pos > self.data.len * 8;
 
 // A NAL unit's payload with emulation prevention bytes (00 00 03) taken out, into `out`.
-fn char[] unescape(char[] nal, List{char}* out)
+fn char[] unescape(char[] nal, List {char}* out) @private
 {
 	out.clear();
 	usz zeros;

@@ -4,118 +4,87 @@ import image::png::chunks;
 import image::png::zlib;
 import std::hash::crc32;
 import std::io::file;
-import std::io;
 
-// Validate image data for basic correctness.
-fn bool validate_image_data(Image* img) {
-	if (img.pixels.len == 0) return false;
+fn bool is_valid_image(Image* img) @private
+{
 	if (img.width == 0 || img.height == 0) return false;
-
-	sz expected = (sz)img.width * (sz)img.height * img.bytes_per_pixel();
-	if (img.pixels.len < expected) return false;
-
-	return true;
+	if (img.bit_depth != 8 && img.bit_depth != 16) return false;
+	return img.pixels.len >= (sz)img.width * (sz)img.height * img.bytes_per_pixel();
 }
 
-fn char[]? save_bytes(Image* img, Allocator allocator = mem, bool check_valid = false) {
-	// Validate image data before encoding
-	if (!validate_image_data(img)) {
-		io::printfn("ERROR: Image data validation failed - refusing to save corrupted image");
-		return INVALID_IMAGE_DATA~;
-	}
-	
-	char color_type = format_to_color_type(img.format);
+<*
+ Encode an image as PNG (no filtering, single IDAT).
 
-	// Prepend filter byte (0x00 = None) to each scanline
-	char[] filtered = apply_filter_none(allocator, img);
+ @param [&in] img : "The image to encode"
+
+ @return "The PNG file bytes, owned by `allocator`"
+ @return? INVALID_IMAGE_DATA, zlib::compress!
+*>
+fn char[]? save_bytes(Image* img, Allocator allocator = mem)
+{
+	if (!is_valid_image(img)) return INVALID_IMAGE_DATA~;
+
+	char[] filtered = add_filter_bytes(allocator, img);
 	defer alloc::free(allocator, filtered);
-
-	// ZLIB compress the filtered data
 	char[] compressed = zlib::compress(allocator, filtered)!;
 	defer alloc::free(allocator, compressed);
 
-	// Build IHDR data (13 bytes)
-	char[13] ihdr_data;
-	ihdr_data[0] = (char)(img.width >> 24);
-	ihdr_data[1] = (char)(img.width >> 16);
-	ihdr_data[2] = (char)(img.width >> 8);
-	ihdr_data[3] = (char)(img.width);
-	ihdr_data[4] = (char)(img.height >> 24);
-	ihdr_data[5] = (char)(img.height >> 16);
-	ihdr_data[6] = (char)(img.height >> 8);
-	ihdr_data[7] = (char)(img.height);
-	ihdr_data[8] = img.bit_depth;
-	ihdr_data[9] = color_type;
-	ihdr_data[10] = 0; // compression method
-	ihdr_data[11] = 0; // filter method
-	ihdr_data[12] = 0; // interlace method
+	// Compression, filter and interlace methods stay 0.
+	char[13] ihdr;
+	bitorder::write(img.width, ihdr[0:4], UIntBE);
+	bitorder::write(img.height, ihdr[4:4], UIntBE);
+	ihdr[8] = img.bit_depth;
+	ihdr[9] = color_type_of(img.format);
 
-	// Calculate total output size
-	sz total = 8 + (12 + 13) + (12 + compressed.len) + 12;
-	char[] output = alloc::new_array(allocator, char, total);
-	sz pos = 0;
-
-	// PNG signature
-	for (sz i = 0; i < 8; i++) {
-		output[i] = chunks::PNG_SIGNATURE[i];
-	}
-	pos = 8;
-
-	// IHDR chunk
-	pos += write_chunk(output[pos..], "IHDR", ihdr_data[..]);
-
-	// IDAT chunk
+	char[] output = alloc::new_array(allocator, char, 8 + (12 + ihdr.len) + (12 + compressed.len) + 12);
+	output[:8] = chunks::PNG_SIGNATURE[..];
+	sz pos = 8;
+	pos += write_chunk(output[pos..], "IHDR", ihdr[..]);
 	pos += write_chunk(output[pos..], "IDAT", compressed);
-
-	// IEND chunk
-	char[] no_data;
-	pos += write_chunk(output[pos..], "IEND", no_data);
-
+	write_chunk(output[pos..], "IEND", {});
 	return output;
 }
 
-fn void? save_file(Image* img, String path, Allocator allocator = mem, bool check_valid = false) {
-	char[] data = save_bytes(img, allocator, check_valid)!;
+<*
+ Encode an image as PNG and write it to `path`.
+
+ @param [&in] img : "The image to encode"
+
+ @return? save_bytes!, file::save!
+*>
+fn void? save_file(Image* img, String path, Allocator allocator = mem)
+{
+	char[] data = save_bytes(img, allocator)!;
 	defer alloc::free(allocator, data);
 	file::save(path, data)!;
 }
 
-fn char[]? tsave_bytes(Image* img, bool check_valid = false) => save_bytes(img, tmem, check_valid);
+fn char[]? tsave_bytes(Image* img) => save_bytes(img, tmem);
 
-fn void? tsave_file(Image* img, String path, bool check_valid = false) => save_file(img, path, tmem, check_valid);
+fn void? tsave_file(Image* img, String path) => save_file(img, path, tmem);
 
-fn sz write_chunk(char[] buf, String chunk_type, char[] data) {
+<*
+ Write one chunk (length, type, data, CRC) to the start of `buf`.
+
+ @require chunk_type.len == 4 : "Chunk types are four characters"
+ @require buf.len >= 12 + data.len : "Buffer too small"
+
+ @return "Bytes written"
+*>
+fn sz write_chunk(char[] buf, String chunk_type, char[] data) @private
+{
 	sz len = data.len;
-
-	// Length (big-endian)
-	buf[0] = (char)((uint)len >> 24);
-	buf[1] = (char)((uint)len >> 16);
-	buf[2] = (char)((uint)len >> 8);
-	buf[3] = (char)((uint)len);
-
-	// Type
-	buf[4] = chunk_type[0];
-	buf[5] = chunk_type[1];
-	buf[6] = chunk_type[2];
-	buf[7] = chunk_type[3];
-
-	// Data
-	for (sz i = 0; i < len; i++) {
-		buf[8 + i] = data[i];
-	}
-
-	// CRC over type + data
-	uint crc = crc32::hash(buf[4 : 4 + len]);
-	buf[8 + len] = (char)(crc >> 24);
-	buf[9 + len] = (char)(crc >> 16);
-	buf[10 + len] = (char)(crc >> 8);
-	buf[11 + len] = (char)(crc);
-
+	bitorder::write((uint)len, buf[0:4], UIntBE);
+	buf[4:4] = chunk_type[..];
+	buf[8:len] = data[..];
+	bitorder::write(crc32::hash(buf[4:4 + len]), buf[8 + len:4], UIntBE);
 	return 12 + len;
 }
 
-fn char format_to_color_type(PixelFormat format) {
-	switch (format) {
+fn char color_type_of(PixelFormat format) @private
+{
+	switch (format)
+	{
 		case GRAYSCALE: return chunks::COLOR_TYPE_GRAYSCALE;
 		case GRAYSCALE_ALPHA: return chunks::COLOR_TYPE_GRAYSCALE_ALPHA;
 		case RGB: return chunks::COLOR_TYPE_RGB;
@@ -123,23 +92,14 @@ fn char format_to_color_type(PixelFormat format) {
 	}
 }
 
-fn char[] apply_filter_none(Allocator allocator, Image* img) {
-	sz bpp = img.bytes_per_pixel();
-	sz row_bytes = (sz)img.width * bpp;
-	sz filtered_size = (sz)img.height * (row_bytes + 1);
-
-	char[] filtered = alloc::new_array(allocator, char, filtered_size);
-
-	for (uint y = 0; y < img.height; y++) {
-		sz src_offset = (sz)y * row_bytes;
-		sz dst_offset = (sz)y * (row_bytes + 1);
-
-		filtered[dst_offset] = 0; // Filter type: None
-
-		for (sz i = 0; i < row_bytes; i++) {
-			filtered[dst_offset + 1 + i] = img.pixels[src_offset + i];
-		}
+// Prefix every row with filter type 0 (None).
+fn char[] add_filter_bytes(Allocator allocator, Image* img) @private
+{
+	sz row_bytes = (sz)img.width * img.bytes_per_pixel();
+	char[] filtered = alloc::new_array(allocator, char, (sz)img.height * (row_bytes + 1));
+	for (uint y = 0; y < img.height; y++)
+	{
+		filtered[(sz)y * (row_bytes + 1) + 1 : row_bytes] = img.pixels[(sz)y * row_bytes : row_bytes];
 	}
-
 	return filtered;
 }

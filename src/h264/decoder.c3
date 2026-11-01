@@ -1,8 +1,8 @@
 module image::h264;
 import std::collections::list;
 
-const uint MAX_PICTURES = 18;
-const uint MAX_REFS = 32;
+const uint MAX_PICTURES @private = 18;
+const uint MAX_REFS @private = 32;
 
 // A decoded picture: 4:2:0 planes at the coded size (whole macroblocks).
 struct Picture
@@ -26,19 +26,26 @@ struct Picture
 	uint long_idx;
 }
 
+<*
+ @return "The displayed width, after the SPS cropping window"
+*>
 fn uint Picture.shown_width(&self) => self.width - self.crop_left - self.crop_right;
+
+<*
+ @return "The displayed height, after the SPS cropping window"
+*>
 fn uint Picture.shown_height(&self) => self.height - self.crop_top - self.crop_bottom;
 
-const char MB_SKIP = 0;
-const char MB_INTER = 1;
-const char MB_I4 = 2;
-const char MB_I16 = 3;
-const char MB_PCM = 4;
+const char MB_SKIP @private = 0;
+const char MB_INTER @private = 1;
+const char MB_I4 @private = 2;
+const char MB_I16 @private = 3;
+const char MB_PCM @private = 4;
 
-fn bool is_intra(char kind) @inline => kind >= MB_I4;
+fn bool is_intra(char kind) @inline @private => kind >= MB_I4;
 
 // What a decoded macroblock leaves for its neighbours and the deblocking filter.
-struct MbInfo
+struct MbInfo @private
 {
 	int slice;      // -1 until decoded in this picture
 	char kind;
@@ -51,7 +58,7 @@ struct MbInfo
 	int[4] pic;     // the referenced picture's id per 8x8; -1 intra
 }
 
-struct SliceInfo
+struct SliceInfo @private
 {
 	uint disable_deblock;
 	int alpha;
@@ -60,14 +67,14 @@ struct SliceInfo
 	int cr_offset;
 }
 
-struct Mmco
+struct Mmco @private
 {
 	uint op;
 	uint a;
 	uint b;
 }
 
-struct Slice
+struct Slice @private
 {
 	Bits bits;
 	bool intra;
@@ -86,9 +93,9 @@ struct Decoder
 	uint nal_length_size;
 	Picture[MAX_PICTURES] pics;
 	MbInfo[] mbs;
-	List{SliceInfo} slices;
-	List{char} rbsp;
-	List{Mmco} mmco;
+	List {SliceInfo} slices;
+	List {char} rbsp;
+	List {Mmco} mmco;
 	uint next_id;
 
 	// The picture being decoded.
@@ -100,8 +107,6 @@ struct Decoder
 	bool cur_long;
 	bool adaptive;
 	uint frame_num;
-	uint prev_ref_frame_num;
-	int max_long_idx;  // -1: no long-term indices
 	Picture*[MAX_REFS + 1] list0;
 	Picture* last;
 
@@ -111,14 +116,20 @@ struct Decoder
 	int[16] dc;
 }
 
+<*
+ Prepare an empty decoder; feed it parameter sets with configure, then samples with decode.
+*>
 fn void Decoder.init(&self, Allocator allocator = mem)
 {
-	*self = { .allocator = allocator, .nal_length_size = 4, .max_long_idx = -1 };
+	*self = { .allocator = allocator, .nal_length_size = 4 };
 	self.slices.init(allocator);
 	self.rbsp.init(allocator);
 	self.mmco.init(allocator);
 }
 
+<*
+ Free every picture and buffer the decoder owns.
+*>
 fn void Decoder.free(&self)
 {
 	foreach (&p : self.pics) free_planes(self.allocator, p);
@@ -141,14 +152,14 @@ fn void free_planes(Allocator allocator, Picture* p) @private
 fn void Decoder.reset(&self)
 {
 	foreach (&p : self.pics) p.short_ref = p.long_ref = false;
-	self.max_long_idx = -1;
-	self.prev_ref_frame_num = 0;
 	self.last = null;
 	self.started = false;
 }
 
 <*
- An MP4 avcC box's body: the NAL length size and the parameter sets.
+ Read an MP4 avcC box's body: the NAL length size and the parameter sets.
+
+ @return? CORRUPT, Decoder.decode_nal!
 *>
 fn void? Decoder.configure(&self, char[] avcc)
 {
@@ -176,8 +187,10 @@ fn void? Decoder.configure(&self, char[] avcc)
 }
 
 <*
- One access unit (an MP4 sample: length-prefixed NAL units). Returns the
- picture it holds, valid until the next call, or null when it holds none.
+ Decode one access unit (an MP4 sample: length-prefixed NAL units).
+
+ @return "The picture it holds, valid until the next call, or null when it holds none"
+ @return? CORRUPT, Decoder.decode_nal!
 *>
 fn Picture*? Decoder.decode(&self, char[] sample)
 {
@@ -298,12 +311,10 @@ fn void? Decoder.decode_slice(&self, Bits* b, bool idr, bool ref)
 				uint op = b.ue();
 				if (op == 0) break;
 				if (op > 6) return CORRUPT~;
+				// Op 3 carries two operands, op 5 none, the rest one.
 				Mmco m = { .op = op };
-				if (op == 1 || op == 3) m.a = b.ue();
-				if (op == 2) m.a = b.ue();
-				if (op == 3 || op == 6) m.b = b.ue();
-				if (op == 4) m.a = b.ue();
-				if (op == 6) m.a = m.b;
+				if (op != 5) m.a = b.ue();
+				if (op == 3) m.b = b.ue();
 				// Every slice repeats the picture's marking; keep the first.
 				if (first) self.mmco.push(m);
 			}
@@ -390,38 +401,54 @@ fn void? Decoder.begin_picture(&self, Sps* sps, uint frame_num, bool idr, bool r
 	}
 }
 
+// Sort key for RefPicList0: short-term by PicNum descending, long-term by index ascending.
+fn int ref_order(Picture* p, bool long_term) @inline @private => long_term ? (int)p.long_idx : -p.frame_num_wrap;
+
+// The reference pictures other than the current one, in RefPicList0 order.
+fn Picture*[] Decoder.refs(&self, Picture*[] out, bool long_term)
+{
+	uint n;
+	foreach (&p : self.pics)
+	{
+		if (p == self.cur || (long_term ? !p.long_ref : !p.short_ref)) continue;
+		// Insertion sort: there are at most MAX_PICTURES.
+		uint k = n++;
+		for (; k > 0 && ref_order(out[k - 1], long_term) > ref_order(p, long_term); k--) out[k] = out[k - 1];
+		out[k] = p;
+	}
+	return out[:n];
+}
+
+// The short-term reference with this PicNum, if any.
+fn Picture* Decoder.short_ref(&self, int pic_num)
+{
+	foreach (&p : self.pics)
+	{
+		if (p.short_ref && p != self.cur && p.frame_num_wrap == pic_num) return p;
+	}
+	return null;
+}
+
+// Free long-term index `idx` by unmarking whichever picture other than `keep` holds it.
+fn void Decoder.drop_long(&self, uint idx, Picture* keep)
+{
+	foreach (&p : self.pics)
+	{
+		if (p.long_ref && p != keep && p.long_idx == idx) p.long_ref = false;
+	}
+}
+
 // RefPicList0 for a P slice: short-term by PicNum down, long-term up, then the slice's changes.
 fn void? Decoder.build_list0(&self, Slice* s, Mmco[] mods)
 {
-	uint n;
+	// Both fit: there are fewer pictures than MAX_REFS.
+	Picture*[MAX_PICTURES] short_buf;
+	Picture*[MAX_PICTURES] long_buf;
+	Picture*[] shorts = self.refs(&short_buf, false);
+	Picture*[] longs = self.refs(&long_buf, true);
 	Picture*[MAX_REFS + 1] list;
-	Picture*[MAX_PICTURES] shorts;
-	uint short_count;
-	foreach (&p : self.pics) if (p.short_ref && p != self.cur) shorts[short_count++] = p;
-	for (uint i = 1; i < short_count; i++)
-	{
-		for (uint k = i; k > 0 && shorts[k - 1].frame_num_wrap < shorts[k].frame_num_wrap; k--)
-		{
-			Picture* t = shorts[k];
-			shorts[k] = shorts[k - 1];
-			shorts[k - 1] = t;
-		}
-	}
-	for (uint i = 0; i < short_count && n < MAX_REFS; i++) list[n++] = shorts[i];
-	Picture*[MAX_PICTURES] longs;
-	uint long_count;
-	foreach (&p : self.pics) if (p.long_ref && p != self.cur) longs[long_count++] = p;
-	for (uint i = 1; i < long_count; i++)
-	{
-		for (uint k = i; k > 0 && longs[k - 1].long_idx > longs[k].long_idx; k--)
-		{
-			Picture* t = longs[k];
-			longs[k] = longs[k - 1];
-			longs[k - 1] = t;
-		}
-	}
-	for (uint i = 0; i < long_count && n < MAX_REFS; i++) list[n++] = longs[i];
-	for (uint i = n; i <= MAX_REFS; i++) list[i] = null;
+	list[:shorts.len] = shorts[..];
+	list[shorts.len:longs.len] = longs[..];
 
 	uint active = s.num_ref;
 	int max_pic_num = 1 << self.cur_sps.log2_max_frame_num;
@@ -438,12 +465,11 @@ fn void? Decoder.build_list0(&self, Slice* s, Mmco[] mods)
 			if (no_wrap < 0) no_wrap += max_pic_num;
 			if (no_wrap >= max_pic_num) no_wrap -= max_pic_num;
 			pred = no_wrap;
-			int pic_num = no_wrap > cur_num ? no_wrap - max_pic_num : no_wrap;
-			for (uint i = 0; i < short_count; i++) if (shorts[i].frame_num_wrap == pic_num) target = shorts[i];
+			target = self.short_ref(no_wrap > cur_num ? no_wrap - max_pic_num : no_wrap);
 		}
 		else
 		{
-			for (uint i = 0; i < long_count; i++) if (longs[i].long_idx == m.a) target = longs[i];
+			foreach (p : longs) if (p.long_idx == m.a) target = p;
 		}
 		if (!target || at >= active) return CORRUPT~;
 		for (uint c = active; c > at; c--) list[c] = list[c - 1];
@@ -455,7 +481,7 @@ fn void? Decoder.build_list0(&self, Slice* s, Mmco[] mods)
 	for (uint i = 0; i < active; i++)
 	{
 		// A missing entry (a damaged stream) reads the nearest picture there is.
-		self.list0[i] = list[i] ? list[i] : (list[0] ? list[0] : self.cur);
+		self.list0[i] = list[i] ?: list[0] ?: self.cur;
 	}
 }
 
@@ -468,19 +494,16 @@ fn void Decoder.finish_picture(&self)
 	if (!self.cur_ref) return;
 	if (self.cur_idr)
 	{
-		foreach (&p : self.pics) if (p != cur) p.short_ref = p.long_ref = false;
+		// begin_picture already dropped every other reference.
 		if (self.cur_long)
 		{
 			cur.long_ref = true;
 			cur.long_idx = 0;
-			self.max_long_idx = 0;
 		}
 		else
 		{
 			cur.short_ref = true;
-			self.max_long_idx = -1;
 		}
-		self.prev_ref_frame_num = cur.frame_num;
 		return;
 	}
 	bool marked_long;
@@ -493,15 +516,13 @@ fn void Decoder.finish_picture(&self)
 			switch (m.op)
 			{
 				case 1:
-					int pic_num = cur_num - ((int)m.a + 1);
-					foreach (&p : self.pics) if (p.short_ref && p != cur && p.frame_num_wrap == pic_num) p.short_ref = false;
+					Picture* target = self.short_ref(cur_num - ((int)m.a + 1));
+					if (target) target.short_ref = false;
 				case 2:
-					foreach (&p : self.pics) if (p.long_ref && p != cur && p.long_idx == m.a) p.long_ref = false;
+					self.drop_long(m.a, cur);
 				case 3:
-					int pic_num = cur_num - ((int)m.a + 1);
-					Picture* target;
-					foreach (&p : self.pics) if (p.short_ref && p != cur && p.frame_num_wrap == pic_num) target = p;
-					foreach (&p : self.pics) if (p.long_ref && p != target && p.long_idx == m.b) p.long_ref = false;
+					Picture* target = self.short_ref(cur_num - ((int)m.a + 1));
+					self.drop_long(m.b, target);
 					if (target)
 					{
 						target.short_ref = false;
@@ -509,14 +530,13 @@ fn void Decoder.finish_picture(&self)
 						target.long_idx = m.b;
 					}
 				case 4:
-					self.max_long_idx = (int)m.a - 1;
-					foreach (&p : self.pics) if (p.long_ref && (int)p.long_idx > self.max_long_idx) p.long_ref = false;
+					// m.a is the new MaxLongTermFrameIdx + 1; 0 means none.
+					foreach (&p : self.pics) if (p.long_ref && p.long_idx >= m.a) p.long_ref = false;
 				case 5:
 					foreach (&p : self.pics) if (p != cur) p.short_ref = p.long_ref = false;
-					self.max_long_idx = -1;
 					reset = true;
 				case 6:
-					foreach (&p : self.pics) if (p.long_ref && p != cur && p.long_idx == m.a) p.long_ref = false;
+					self.drop_long(m.a, cur);
 					cur.long_ref = true;
 					cur.long_idx = m.a;
 					marked_long = true;
@@ -547,5 +567,4 @@ fn void Decoder.finish_picture(&self)
 	}
 	if (!marked_long) cur.short_ref = true;
 	if (reset) cur.frame_num = 0;
-	self.prev_ref_frame_num = cur.frame_num;
 }

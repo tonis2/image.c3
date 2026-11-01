@@ -7,43 +7,57 @@ import image::jpeg::ycbcr;
 import std::io::file;
 import std::math;
 
-faultdef
-	INVALID_SIGNATURE, UNSUPPORTED_MARKER, UNSUPPORTED_SOF, INVALID_QUANT_TABLE, INVALID_HUFFMAN_TABLE, INVALID_SOS, UNEXPECTED_EOF, INVALID_COMPONENT_COUNT, UNSUPPORTED_SAMPLING, INVALID_BITSTREAM, INVALID_DRI, INVALID_SOF
-;
+excuse INVALID_SIGNATURE,
+       UNSUPPORTED_MARKER,
+       UNSUPPORTED_SOF,
+       INVALID_QUANT_TABLE,
+       INVALID_HUFFMAN_TABLE,
+       INVALID_SOS,
+       INVALID_SOF,
+       INVALID_DRI,
+       INVALID_SEGMENT,
+       INVALID_COMPONENT_COUNT,
+       UNSUPPORTED_SAMPLING,
+       INVALID_BITSTREAM,
+       UNEXPECTED_EOF;
 
-const sz MAX_COMPONENTS = 3;
+const sz MAX_COMPONENTS @private = 3;
 
-struct Component
+struct Component @private
 {
 	char id;
 	char h_samp;
 	char v_samp;
 	char quant_id;
 	int dc_pred;
-	uint width; // effective pixel width at component resolution
-	uint height; // effective pixel height at component resolution
-	uint stride; // padded stride (bytes per row in plane buffer)
-	uint plane_h; // padded plane height
-	uint cols_blocks; // = stride / 8
-	uint rows_blocks; // = plane_h / 8
+	uint width;        // pixels at component resolution
+	uint height;
+	uint stride;       // plane row length, padded to whole MCUs
+	uint rows_blocks;  // padded plane height in blocks
 	char[] plane;
-	int[] coeffs; // progressive only: cols_blocks * rows_blocks * 64 ints (natural order)
+	int[] coeffs;      // progressive only: 64 ints per block, natural order
 }
 
-struct QuantTable
+// The 64 coefficients of block (bx, by); progressive images only.
+fn int[64]* Component.block(&self, uint bx, uint by) @inline
+{
+	return (int[64]*)&self.coeffs[((sz)by * (self.stride / 8) + bx) * 64];
+}
+
+struct QuantTable @private
 {
 	bool defined;
 	int[64] table; // natural row-major order
 }
 
-struct ScanComp
+struct ScanComp @private
 {
 	uint comp_idx;
 	char huff_dc_id;
 	char huff_ac_id;
 }
 
-struct ScanInfo
+struct ScanInfo @private
 {
 	uint num_comps;
 	ScanComp[MAX_COMPONENTS] comps;
@@ -53,25 +67,30 @@ struct ScanInfo
 	uint al;
 }
 
-struct JpegState
+struct JpegState @private
 {
 	uint width;
 	uint height;
-	int num_components;
+	uint num_components;
 	bool progressive;
 	Component[MAX_COMPONENTS] comp;
 	QuantTable[4] qt;
 	huffman::HuffmanTable[4] huff_dc;
 	huffman::HuffmanTable[4] huff_ac;
-	int restart_interval;
-	int max_h;
-	int max_v;
+	uint restart_interval;
+	uint max_h;
+	uint max_v;
 	uint mcu_cols;
 	uint mcu_rows;
 	int eob_run;
 	Allocator allocator;
 }
 
+<*
+ Load and decode a baseline or progressive JPEG file.
+
+ @return? file::load!, load_bytes!
+*>
 fn Image? load_file(String path, Allocator allocator = mem)
 {
 	char[] file_data = file::load(allocator, path)!;
@@ -83,31 +102,27 @@ fn Image? tload_file(String path) => load_file(path, tmem);
 
 fn Image? tload_bytes(char[] data) => load_bytes(data, tmem);
 
+<*
+ Decode a JPEG held in memory: 8-bit baseline or progressive, grayscale or YCbCr.
+
+ @return "RGB for colour images, GRAYSCALE for single-component ones; free it with Image.free"
+ @return? INVALID_SIGNATURE, UNSUPPORTED_MARKER, UNSUPPORTED_SOF, INVALID_QUANT_TABLE, INVALID_HUFFMAN_TABLE, INVALID_SOS, INVALID_SOF, INVALID_DRI, INVALID_SEGMENT, INVALID_COMPONENT_COUNT, UNSUPPORTED_SAMPLING, INVALID_BITSTREAM, UNEXPECTED_EOF
+*>
 fn Image? load_bytes(char[] data, Allocator allocator = mem)
 {
-	if (data.len < 4 || data[0] != 0xFF || data[1] != markers::SOI)
-	{
-		return INVALID_SIGNATURE~;
-	}
+	if (data.len < 4 || data[0] != 0xFF || data[1] != markers::SOI) return INVALID_SIGNATURE~;
 
-	JpegState state;
-	state.allocator = allocator;
+	JpegState state = { .allocator = allocator };
 	defer state.free_buffers();
 
-	sz offset     = 2;
-	bool sof_seen = false;
-	bool eoi_seen = false;
-
-	while (offset < data.len && !eoi_seen)
+	sz offset = 2;
+	bool sof_seen;
+	while (offset < data.len)
 	{
 		markers::Segment seg = markers::next_segment(data, offset)!;
 		offset = seg.next_offset;
 
-		if (seg.marker == markers::EOI)
-		{
-			eoi_seen = true;
-			break;
-		}
+		if (seg.marker == markers::EOI) break;
 		if (seg.marker == markers::SOI) continue;
 		if (markers::is_app_or_com(seg.marker)) continue;
 		if (markers::is_rst(seg.marker)) continue;
@@ -120,14 +135,11 @@ fn Image? load_bytes(char[] data, Allocator allocator = mem)
 				state.parse_dht(seg.payload)!;
 			case markers::DRI:
 				if (seg.payload.len != 2) return INVALID_DRI~;
-				state.restart_interval = (int)markers::read_u16_be(seg.payload);
+				state.restart_interval = markers::read_u16_be(seg.payload);
 			case markers::SOF0:
-				if (sof_seen) return INVALID_SOF~;
-				state.start_frame(seg.payload, false)!;
-				sof_seen = true;
 			case markers::SOF2:
 				if (sof_seen) return INVALID_SOF~;
-				state.start_frame(seg.payload, true)!;
+				state.start_frame(seg.payload, seg.marker == markers::SOF2)!;
 				sof_seen = true;
 			case markers::SOS:
 				if (!sof_seen) return INVALID_SOS~;
@@ -146,19 +158,16 @@ fn Image? load_bytes(char[] data, Allocator allocator = mem)
 		}
 	}
 
-	if (!sof_seen) return INVALID_SOS~;
+	if (!sof_seen) return INVALID_SOF~;
 	if (state.progressive) state.finalize_progressive()!;
 	return state.compose_image();
 }
-
-// --- Header parsing ---
 
 fn void? JpegState.parse_dqt(&self, char[] payload)
 {
 	sz i = 0;
 	while (i < payload.len)
 	{
-		if (i + 1 > payload.len) return INVALID_QUANT_TABLE~;
 		char pq_tq = payload[i++];
 		uint pq    = (uint)(pq_tq >> 4);
 		uint tq    = (uint)(pq_tq & 0x0F);
@@ -224,11 +233,11 @@ fn void? JpegState.parse_sof(&self, char[] payload, bool progressive)
 
 	self.width = w;
 	self.height = h;
-	self.num_components = (int)nf;
+	self.num_components = nf;
 	self.progressive = progressive;
 
-	int max_h = 1;
-	int max_v = 1;
+	uint max_h = 1;
+	uint max_v = 1;
 	for (uint c = 0; c < nf; c++)
 	{
 		sz off  = 6 + (sz)c * 3;
@@ -243,15 +252,13 @@ fn void? JpegState.parse_sof(&self, char[] payload, bool progressive)
 		self.comp[c].h_samp = hs;
 		self.comp[c].v_samp = vs;
 		self.comp[c].quant_id = tq;
-		max_h = math::max(max_h, (int)hs);
-		max_v = math::max(max_v, (int)vs);
+		max_h = math::max(max_h, (uint)hs);
+		max_v = math::max(max_v, (uint)vs);
 	}
 	self.max_h = max_h;
 	self.max_v = max_v;
-	uint mcu_w_px = (uint)(8 * max_h);
-	uint mcu_h_px = (uint)(8 * max_v);
-	self.mcu_cols = (w + mcu_w_px - 1) / mcu_w_px;
-	self.mcu_rows = (h + mcu_h_px - 1) / mcu_h_px;
+	self.mcu_cols = (w + 8 * max_h - 1) / (8 * max_h);
+	self.mcu_rows = (h + 8 * max_v - 1) / (8 * max_v);
 }
 
 fn ScanInfo? JpegState.parse_sos(&self, char[] payload)
@@ -275,7 +282,7 @@ fn ScanInfo? JpegState.parse_sos(&self, char[] payload)
 		if (!self.progressive && ((uint)td > 1 || (uint)ta > 1)) return INVALID_SOS~;
 
 		int ci = -1;
-		for (uint i = 0; i < (uint)self.num_components; i++)
+		for (uint i = 0; i < self.num_components; i++)
 		{
 			if (self.comp[i].id == cs)
 			{
@@ -316,110 +323,92 @@ fn ScanInfo? JpegState.parse_sos(&self, char[] payload)
 	return info;
 }
 
-// --- Buffer management ---
-
 fn void JpegState.allocate_planes(&self)
 {
-	for (uint c = 0; c < (uint)self.num_components; c++)
+	foreach (&cm : self.comp[:self.num_components])
 	{
-		Component* cm = &self.comp[c];
-		uint stride   = self.mcu_cols * (uint)cm.h_samp * 8;
-		uint plane_h  = self.mcu_rows * (uint)cm.v_samp * 8;
-		cm.stride = stride;
-		cm.plane_h = plane_h;
-		cm.cols_blocks = stride / 8;
-		cm.rows_blocks = plane_h / 8;
-		cm.width = (self.width * (uint)cm.h_samp + (uint)self.max_h - 1) / (uint)self.max_h;
-		cm.height = (self.height * (uint)cm.v_samp + (uint)self.max_v - 1) / (uint)self.max_v;
-		cm.plane = alloc::new_array(self.allocator, char, (sz)stride * (sz)plane_h);
+		cm.stride = self.mcu_cols * cm.h_samp * 8;
+		cm.rows_blocks = self.mcu_rows * cm.v_samp;
+		cm.width = (self.width * cm.h_samp + self.max_h - 1) / self.max_h;
+		cm.height = (self.height * cm.v_samp + self.max_v - 1) / self.max_v;
+		cm.plane = alloc::new_array(self.allocator, char, (sz)cm.stride * cm.rows_blocks * 8);
 	}
 }
 
 fn void JpegState.allocate_coeffs(&self)
 {
-	for (uint c = 0; c < (uint)self.num_components; c++)
+	foreach (&cm : self.comp[:self.num_components])
 	{
-		Component* cm = &self.comp[c];
-		sz total      = (sz)cm.cols_blocks * (sz)cm.rows_blocks * 64;
-		cm.coeffs = alloc::new_array(self.allocator, int, total);
+		cm.coeffs = alloc::new_array(self.allocator, int, (sz)cm.stride / 8 * cm.rows_blocks * 64);
 	}
 }
 
 fn void JpegState.free_buffers(&self)
 {
-	for (uint c = 0; c < MAX_COMPONENTS; c++)
+	foreach (&cm : self.comp)
 	{
-		if (self.comp[c].plane.len > 0)
-		{
-			alloc::free(self.allocator, self.comp[c].plane);
-			self.comp[c].plane = { };
-		}
-		if (self.comp[c].coeffs.len > 0)
-		{
-			alloc::free(self.allocator, self.comp[c].coeffs);
-			self.comp[c].coeffs = { };
-		}
+		if (cm.plane.len > 0) alloc::free(self.allocator, cm.plane);
+		if (cm.coeffs.len > 0) alloc::free(self.allocator, cm.coeffs);
+		cm.plane = {};
+		cm.coeffs = {};
 	}
 }
 
-// Dequantize a block (natural row-major order) and inverse-DCT it into the plane.
-fn void dequant_idct(QuantTable* qt, int* coeffs, char[] plane, sz offset, sz stride)
+// Dequantize a block (natural order) and inverse-DCT it into block (bx, by) of the plane.
+fn void dequant_idct(QuantTable* qt, int[64]* coeffs, Component* cm, uint bx, uint by) @private
 {
 	int[64] block;
-	for (uint i = 0; i < 64; i++) block[i] = coeffs[i] * qt.table[i];
-	idct::idct_block(&block[0], plane, offset, stride);
+	foreach (i, c : *coeffs) block[i] = c * qt.table[i];
+	idct::idct_block(&block[0], cm.plane, (sz)by * 8 * cm.stride + (sz)bx * 8, cm.stride);
 }
 
-// --- Baseline scan (single SOS, full 0..63 with no successive approximation) ---
+// Count one restart unit; at each interval boundary except the scan's last unit, expect RSTn.
+// Returns true when a restart happened.
+fn bool? JpegState.count_restart(&self, huffman::BitReader* br, ScanInfo* scan, uint* count, bool last)
+{
+	if (self.restart_interval == 0 || ++*count != self.restart_interval) return false;
+	*count = 0;
+	// After the last unit comes whatever ends the scan (EOI, DHT, SOS...), not RSTn.
+	if (last) return false;
+	self.handle_restart(br, scan)!;
+	return true;
+}
 
+// Baseline: one interleaved or single-component scan of full 0..63 blocks.
 fn sz? JpegState.decode_baseline_scan(&self, ScanInfo* scan, char[] data, sz start_offset)
 {
+	foreach (sc : scan.comps[:scan.num_comps])
+	{
+		if (!self.huff_dc[sc.huff_dc_id].defined || !self.huff_ac[sc.huff_ac_id].defined) return INVALID_HUFFMAN_TABLE~;
+		if (!self.qt[self.comp[sc.comp_idx].quant_id].defined) return INVALID_QUANT_TABLE~;
+	}
+
 	huffman::BitReader br;
 	br.init(data, start_offset);
-
-	int rst_count = 0;
-	int next_rst  = 0;
-
+	uint rst_count;
 	for (uint my = 0; my < self.mcu_rows; my++)
 	{
 		for (uint mx = 0; mx < self.mcu_cols; mx++)
 		{
-			for (uint k = 0; k < scan.num_comps; k++)
+			foreach (sc : scan.comps[:scan.num_comps])
 			{
-				ScanComp* sc              = &scan.comps[k];
-				Component* cm             = &self.comp[sc.comp_idx];
-				huffman::HuffmanTable* dc = &self.huff_dc[sc.huff_dc_id];
-				huffman::HuffmanTable* ac = &self.huff_ac[sc.huff_ac_id];
-				if (!dc.defined || !ac.defined) return INVALID_HUFFMAN_TABLE~;
-				QuantTable* qt = &self.qt[cm.quant_id];
-				if (!qt.defined) return INVALID_QUANT_TABLE~;
-
-				for (uint vy = 0; vy < (uint)cm.v_samp; vy++)
+				Component* cm = &self.comp[sc.comp_idx];
+				for (uint vy = 0; vy < cm.v_samp; vy++)
 				{
-					for (uint vx = 0; vx < (uint)cm.h_samp; vx++)
+					for (uint vx = 0; vx < cm.h_samp; vx++)
 					{
 						int[64] coeffs;
-						huffman::decode_block(&br, dc, ac, &coeffs[0], &cm.dc_pred)!;
-
-						sz row_y = (sz)((my * (uint)cm.v_samp + vy) * 8);
-						sz col_x = (sz)((mx * (uint)cm.h_samp + vx) * 8);
-						dequant_idct(qt, &coeffs[0], cm.plane, row_y * (sz)cm.stride + col_x, (sz)cm.stride);
+						huffman::decode_block(&br, &self.huff_dc[sc.huff_dc_id], &self.huff_ac[sc.huff_ac_id], &coeffs, &cm.dc_pred)!;
+						dequant_idct(&self.qt[cm.quant_id], &coeffs, cm, mx * cm.h_samp + vx, my * cm.v_samp + vy);
 					}
 				}
 			}
-
-			if (self.restart_interval > 0 && ++rst_count == self.restart_interval)
-			{
-				rst_count = 0;
-				self.handle_restart(&br, scan, &next_rst, my, mx)!;
-			}
+			bool last = my == self.mcu_rows - 1 && mx == self.mcu_cols - 1;
+			self.count_restart(&br, scan, &rst_count, last)!;
 		}
 	}
-
 	return finish_scan(&br);
 }
-
-// --- Progressive scan dispatch ---
 
 fn sz? JpegState.decode_progressive_scan(&self, ScanInfo* scan, char[] data, sz start_offset)
 {
@@ -439,48 +428,49 @@ fn sz? JpegState.decode_progressive_scan(&self, ScanInfo* scan, char[] data, sz 
 	return finish_scan(&br);
 }
 
-// Multi-component scan: must be DC-only (validated in parse_sos: ss>0 → ns==1).
+// DC for one block: the first pass reads the shifted value, later passes add one bit.
+fn void? decode_dc(huffman::BitReader* br, huffman::HuffmanTable* dc, int* coef, int* dc_pred, ScanInfo* scan) @private
+{
+	if (scan.ah == 0)
+	{
+		coef[0] = huffman::decode_dc(br, dc, dc_pred)! << scan.al;
+	}
+	else if (br.receive(1)!)
+	{
+		coef[0] |= 1 << scan.al;
+	}
+}
+
+// Multi-component scan: DC only (parse_sos rejects interleaved AC scans).
 fn void? JpegState.decode_progressive_interleaved(&self, huffman::BitReader* br, ScanInfo* scan)
 {
-	bool first    = scan.ah == 0;
-	int rst_count = 0;
-	int next_rst  = 0;
+	if (scan.ah == 0)
+	{
+		foreach (sc : scan.comps[:scan.num_comps])
+		{
+			if (!self.huff_dc[sc.huff_dc_id].defined) return INVALID_HUFFMAN_TABLE~;
+		}
+	}
 
+	uint rst_count;
 	for (uint my = 0; my < self.mcu_rows; my++)
 	{
 		for (uint mx = 0; mx < self.mcu_cols; mx++)
 		{
-			for (uint k = 0; k < scan.num_comps; k++)
+			foreach (sc : scan.comps[:scan.num_comps])
 			{
-				ScanComp* sc              = &scan.comps[k];
-				Component* cm             = &self.comp[sc.comp_idx];
-				huffman::HuffmanTable* dc = &self.huff_dc[sc.huff_dc_id];
-				if (first && !dc.defined) return INVALID_HUFFMAN_TABLE~;
-
-				for (uint vy = 0; vy < (uint)cm.v_samp; vy++)
+				Component* cm = &self.comp[sc.comp_idx];
+				for (uint vy = 0; vy < cm.v_samp; vy++)
 				{
-					for (uint vx = 0; vx < (uint)cm.h_samp; vx++)
+					for (uint vx = 0; vx < cm.h_samp; vx++)
 					{
-						uint by   = my * (uint)cm.v_samp + vy;
-						uint bx   = mx * (uint)cm.h_samp + vx;
-						int* coef = &cm.coeffs[((sz)by * cm.cols_blocks + bx) * 64];
-						if (first)
-						{
-							decode_dc_first(br, dc, coef, &cm.dc_pred, scan.al)!;
-						}
-						else
-						{
-							decode_dc_refine(br, coef, scan.al)!;
-						}
+						int[64]* coef = cm.block(mx * cm.h_samp + vx, my * cm.v_samp + vy);
+						decode_dc(br, &self.huff_dc[sc.huff_dc_id], &(*coef)[0], &cm.dc_pred, scan)!;
 					}
 				}
 			}
-
-			if (self.restart_interval > 0 && ++rst_count == self.restart_interval)
-			{
-				rst_count = 0;
-				self.handle_restart(br, scan, &next_rst, my, mx)!;
-			}
+			bool last = my == self.mcu_rows - 1 && mx == self.mcu_cols - 1;
+			self.count_restart(br, scan, &rst_count, last)!;
 		}
 	}
 }
@@ -495,72 +485,36 @@ fn void? JpegState.decode_progressive_single(&self, huffman::BitReader* br, Scan
 	Component* cm             = &self.comp[sc.comp_idx];
 	huffman::HuffmanTable* dc = &self.huff_dc[sc.huff_dc_id];
 	huffman::HuffmanTable* ac = &self.huff_ac[sc.huff_ac_id];
+	if (dc_only ? first && !dc.defined : !ac.defined) return INVALID_HUFFMAN_TABLE~;
 
-	// Block dimensions for non-interleaved scan (T.81 A.2.4):
+	// Block counts for a non-interleaved scan (T.81 A.2.4):
 	//   ceil(X * H_i / (8 * H_max)) x ceil(Y * V_i / (8 * V_max))
-	uint nb_x = (self.width * (uint)cm.h_samp + 8u * (uint)self.max_h - 1) / (8u * (uint)self.max_h);
-	uint nb_y = (self.height * (uint)cm.v_samp + 8u * (uint)self.max_v - 1) / (8u * (uint)self.max_v);
+	uint nb_x = (self.width * cm.h_samp + 8 * self.max_h - 1) / (8 * self.max_h);
+	uint nb_y = (self.height * cm.v_samp + 8 * self.max_v - 1) / (8 * self.max_v);
 
-	int rst_count = 0;
-	int next_rst  = 0;
-
+	uint rst_count;
 	for (uint by = 0; by < nb_y; by++)
 	{
 		for (uint bx = 0; bx < nb_x; bx++)
 		{
-			int* coef = &cm.coeffs[((sz)by * cm.cols_blocks + bx) * 64];
-
-			if (dc_only)
+			int* coef = &(*cm.block(bx, by))[0];
+			switch
 			{
-				if (!dc.defined) return INVALID_HUFFMAN_TABLE~;
-				if (first)
-				{
-					decode_dc_first(br, dc, coef, &cm.dc_pred, scan.al)!;
-				}
-				else
-				{
-					decode_dc_refine(br, coef, scan.al)!;
-				}
-			}
-			else
-			{
-				if (!ac.defined) return INVALID_HUFFMAN_TABLE~;
-				if (first)
-				{
+				case dc_only:
+					decode_dc(br, dc, coef, &cm.dc_pred, scan)!;
+				case first:
 					decode_ac_first(br, ac, coef, scan.ss, scan.se, scan.al, &self.eob_run)!;
-				}
-				else
-				{
+				default:
 					decode_ac_refine(br, ac, coef, scan.ss, scan.se, scan.al, &self.eob_run)!;
-				}
 			}
-
-			if (self.restart_interval > 0 && ++rst_count == self.restart_interval)
-			{
-				rst_count = 0;
-				self.handle_restart(br, scan, &next_rst, by, bx)!;
-				self.eob_run = 0;
-			}
+			bool last = by == nb_y - 1 && bx == nb_x - 1;
+			if (self.count_restart(br, scan, &rst_count, last)!) self.eob_run = 0;
 		}
 	}
 }
 
-// --- Progressive coefficient decoders ---
-
-fn void? decode_dc_first(huffman::BitReader* br, huffman::HuffmanTable* dc, int* coef, int* dc_pred, uint al)
-{
-	int t = br.decode_symbol(dc)!;
-	if (t < 0 || t > 15) return INVALID_BITSTREAM~;
-	int diff = br.receive_extend((uint)t)!;
-	*dc_pred += diff;
-	coef[0] = *dc_pred << al;
-}
-
-fn void? decode_dc_refine(huffman::BitReader* br, int* coef, uint al)
-{
-	int bit = br.receive(1)!;
-	if (bit) coef[0] |= 1 << al;
-}
+// Length of an end-of-band run: 2^r plus r extra bits.
+fn int? read_eob_run(huffman::BitReader* br, uint r) @private => (1 << r) + br.receive(r)!;
 
 fn void? decode_ac_first(
 	huffman::BitReader* br,
@@ -570,7 +524,7 @@ fn void? decode_ac_first(
 	uint se,
 	uint al,
 	int* eob_run
-)
+) @private
 {
 	if (*eob_run > 0)
 	{
@@ -588,9 +542,7 @@ fn void? decode_ac_first(
 		{
 			if (r < 15)
 			{
-				int run = 1 << r;
-				if (r > 0) run += br.receive(r)!;
-				*eob_run = run - 1;
+				*eob_run = read_eob_run(br, r)! - 1;
 				return;
 			}
 			// ZRL: skip 16 zero coefficients
@@ -599,15 +551,14 @@ fn void? decode_ac_first(
 		}
 		k += r;
 		if (k > se) return INVALID_BITSTREAM~;
-		int v = br.receive_extend(sbits)!;
-		coef[huffman::ZIGZAG[k]] = v << al;
+		coef[huffman::ZIGZAG[k]] = br.receive_extend(sbits)! << al;
 		k++;
 	}
 }
 
 // Apply one refinement bit to an existing nonzero coefficient. Returns
 // true if `slot` was nonzero (i.e. the bit was consumed).
-fn bool? refine_slot(huffman::BitReader* br, int* slot, int p1)
+fn bool? refine_slot(huffman::BitReader* br, int* slot, int p1) @private
 {
 	if (*slot == 0) return false;
 	int b = br.receive(1)!;
@@ -626,7 +577,7 @@ fn void? decode_ac_refine(
 	uint se,
 	uint al,
 	int* eob_run
-)
+) @private
 {
 	int p1 = 1 << al;
 	uint k = ss;
@@ -646,9 +597,7 @@ fn void? decode_ac_refine(
 				if (r != 15)
 				{
 					// EOBn: this block plus (eob_run - 1) more get refinement-only
-					int run = 1 << r;
-					if (r > 0) run += br.receive(r)!;
-					*eob_run = run;
+					*eob_run = read_eob_run(br, r)!;
 					break;
 				}
 				// ZRL: skip 16 zero positions. With r=15 in the inner loop and
@@ -700,33 +649,21 @@ fn void? decode_ac_refine(
 	}
 }
 
-// --- Restart and end-of-scan helpers ---
-
-fn void? JpegState.handle_restart(&self, huffman::BitReader* br, ScanInfo* scan, int* next_rst, uint my, uint mx)
+// Consume an RSTn marker and reset the entropy decoder state.
+fn void? JpegState.handle_restart(&self, huffman::BitReader* br, ScanInfo* scan)
 {
 	br.flush_to_byte();
 	if (!br.marker_seen) br.refill();
 	if (!br.marker_seen) return;
-
-	char m    = br.marker;
-	// Allow EOI on the very last block
-
-	bool last = (my == self.mcu_rows - 1) && (mx == self.mcu_cols - 1);
-	if (last && m == markers::EOI) return;
-	char expected = (char)(markers::RST0 + (char)*next_rst);
-	if (m != expected && !markers::is_rst(m)) return INVALID_BITSTREAM~;
-	*next_rst = (*next_rst + 1) & 7;
+	if (!markers::is_rst(br.marker)) return INVALID_BITSTREAM~;
 	br.marker_seen = false;
 	br.marker = 0;
 	br.buf = 0;
 	br.bits = 0;
-	for (uint k = 0; k < scan.num_comps; k++)
-	{
-		self.comp[scan.comps[k].comp_idx].dc_pred = 0;
-	}
+	foreach (sc : scan.comps[:scan.num_comps]) self.comp[sc.comp_idx].dc_pred = 0;
 }
 
-fn sz? finish_scan(huffman::BitReader* br)
+fn sz? finish_scan(huffman::BitReader* br) @private
 {
 	if (!br.marker_seen) br.refill();
 	if (!br.marker_seen) return UNEXPECTED_EOF~;
@@ -735,32 +672,21 @@ fn sz? finish_scan(huffman::BitReader* br)
 	return br.pos - 2;
 }
 
-// --- Progressive finalize: dequantize and IDCT all blocks into plane buffers ---
-
+// Dequantize and IDCT every progressive block into the planes.
 fn void? JpegState.finalize_progressive(&self)
 {
-	for (uint c = 0; c < (uint)self.num_components; c++)
+	foreach (&cm : self.comp[:self.num_components])
 	{
-		Component* cm  = &self.comp[c];
 		QuantTable* qt = &self.qt[cm.quant_id];
 		if (!qt.defined) return INVALID_QUANT_TABLE~;
-
 		for (uint by = 0; by < cm.rows_blocks; by++)
 		{
-			for (uint bx = 0; bx < cm.cols_blocks; bx++)
-			{
-				int* src = &cm.coeffs[((sz)by * cm.cols_blocks + bx) * 64];
-				sz row_y = (sz)by * 8;
-				sz col_x = (sz)bx * 8;
-				dequant_idct(qt, src, cm.plane, row_y * (sz)cm.stride + col_x, (sz)cm.stride);
-			}
+			for (uint bx = 0; bx < cm.stride / 8; bx++) dequant_idct(qt, cm.block(bx, by), cm, bx, by);
 		}
 	}
 }
 
-// --- Output composition ---
-
-fn Image? JpegState.compose_image(&self)
+fn Image JpegState.compose_image(&self)
 {
 	bool is_color  = self.num_components == 3;
 	sz pixel_count = (sz)self.width * (sz)self.height;
@@ -780,17 +706,11 @@ fn Image? JpegState.compose_image(&self)
 		self.upsample_to_full(1, cb_full);
 		self.upsample_to_full(2, cr_full);
 
-		ycbcr::ycbcr_to_rgb(y_full, cb_full, cr_full, output, self.width, self.height);
+		ycbcr::ycbcr_to_rgb(y_full, cb_full, cr_full, output);
 	}
 	else
 	{
-		Component* c = &self.comp[0];
-		for (uint y = 0; y < self.height; y++)
-		{
-			sz src = (sz)y * (sz)c.stride;
-			sz dst = (sz)y * (sz)self.width;
-			mem::copy(&output[dst], &c.plane[src], (sz)self.width);
-		}
+		self.upsample_to_full(0, output);
 	}
 
 	return {
@@ -806,24 +726,11 @@ fn Image? JpegState.compose_image(&self)
 fn void JpegState.upsample_to_full(&self, uint c_idx, char[] dst)
 {
 	Component* c = &self.comp[c_idx];
-	uint w       = self.width;
-	uint h       = self.height;
-	uint hs      = (uint)c.h_samp;
-	uint vs      = (uint)c.v_samp;
-	uint mh      = (uint)self.max_h;
-	uint mv      = (uint)self.max_v;
-
-	for (uint y = 0; y < h; y++)
+	for (uint y = 0; y < self.height; y++)
 	{
-		uint sy = y * vs / mv;
-		if (sy >= c.height) sy = c.height - 1;
-		sz src_row = (sz)sy * (sz)c.stride;
-		sz dst_row = (sz)y * (sz)w;
-		for (uint x = 0; x < w; x++)
-		{
-			uint sx = x * hs / mh;
-			if (sx >= c.width) sx = c.width - 1;
-			dst[dst_row + x] = c.plane[src_row + sx];
-		}
+		uint sy = math::min(y * c.v_samp / self.max_v, c.height - 1);
+		char[] src = c.plane[(sz)sy * c.stride:c.stride];
+		char[] out = dst[(sz)y * self.width:self.width];
+		foreach (x, &px : out) *px = src[math::min((uint)x * c.h_samp / self.max_h, c.width - 1)];
 	}
 }

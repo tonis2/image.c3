@@ -1,19 +1,19 @@
 module image::h264;
 
 // 4x4 frame scan: scan position to raster (x + 4y).
-const char[16] ZIGZAG = { 0, 1, 4, 8, 5, 2, 3, 6, 9, 12, 13, 10, 7, 11, 14, 15 };
+const char[16] ZIGZAG @private = { 0, 1, 4, 8, 5, 2, 3, 6, 9, 12, 13, 10, 7, 11, 14, 15 };
 // Luma 4x4 block index (8x8 quadrants, then 4x4 inside) to raster.
-const char[16] BLK_RASTER = { 0, 1, 4, 5, 2, 3, 6, 7, 8, 9, 12, 13, 10, 11, 14, 15 };
+const char[16] BLK_RASTER @private = { 0, 1, 4, 5, 2, 3, 6, 7, 8, 9, 12, 13, 10, 11, 14, 15 };
 // coded_block_pattern from me(v) (Table 9-4, 4:2:0).
-const char[48] CBP_INTRA = {
+const char[48] CBP_INTRA @private = {
 	47, 31, 15, 0, 23, 27, 29, 30, 7, 11, 13, 14, 39, 43, 45, 46, 16, 3, 5, 10, 12, 19, 21, 26, 28, 35,
 	37, 42, 44, 1, 2, 4, 8, 17, 18, 20, 24, 6, 9, 22, 25, 32, 33, 34, 36, 40, 38, 41 };
-const char[48] CBP_INTER = {
+const char[48] CBP_INTER @private = {
 	0, 16, 1, 2, 4, 8, 32, 3, 5, 10, 12, 15, 47, 7, 11, 13, 14, 6, 9, 31, 35, 37, 42, 44, 33, 34, 36, 40,
 	39, 43, 45, 46, 17, 18, 20, 24, 19, 21, 26, 28, 23, 27, 29, 30, 22, 25, 38, 41 };
 
 // A neighbouring 4x4 block's motion for prediction (8.4.1.3).
-struct Near
+struct Near @private
 {
 	bool avail;
 	int ref;  // -1 when not there or intra
@@ -21,7 +21,7 @@ struct Near
 	int y;
 }
 
-const Near NONE = { .ref = -1 };
+const Near NONE @private = { .ref = -1 };
 
 fn void? Decoder.slice_data(&self, Slice* s)
 {
@@ -87,9 +87,8 @@ fn void? Decoder.macroblock(&self, Slice* s, uint addr)
 	if (t == 0)
 	{
 		mb.kind = MB_I4;
-		for (uint blk = 0; blk < 16; blk++)
+		foreach (r : BLK_RASTER)
 		{
-			uint r = BLK_RASTER[blk];
 			uint pred = self.predicted_mode(s, addr, r);
 			uint mode = pred;
 			if (!b.flag())
@@ -105,9 +104,8 @@ fn void? Decoder.macroblock(&self, Slice* s, uint addr)
 		if (code > 47) return CORRUPT~;
 		uint cbp = CBP_INTRA[code];
 		self.residual(s, addr, cbp, false)!;
-		for (uint blk = 0; blk < 16; blk++)
+		foreach (r : BLK_RASTER)
 		{
-			uint r = BLK_RASTER[blk];
 			self.intra4x4(s, addr, r)!;
 			self.add_luma(addr, r, mb.qp, false);
 		}
@@ -115,8 +113,8 @@ fn void? Decoder.macroblock(&self, Slice* s, uint addr)
 		self.add_chroma(addr, mb.qp, s);
 		return;
 	}
+	// Intra 4x4 modes are only read from MB_I4 neighbours, so I16 and PCM leave theirs unset.
 	mb.kind = MB_I16;
-	foreach (&m : mb.mode) *m = 2;
 	uint mode = (t - 1) % 4;
 	uint cbp = ((t - 1) / 4) % 3 << 4 | (t >= 13 ? 15 : 0);
 	uint chroma = b.ue();
@@ -134,10 +132,8 @@ fn void? Decoder.pcm_mb(&self, Slice* s, uint addr)
 	Bits* b = &s.bits;
 	MbInfo* mb = &self.mbs[addr];
 	mb.kind = MB_PCM;
-	mb.qp = 0;
-	foreach (&n : mb.nz) *n = 16;
-	foreach (&n : mb.nzc) *n = 16;
-	foreach (&m : mb.mode) *m = 2;
+	mb.nz[..] = 16;
+	mb.nzc[..] = 16;
 	b.pos = (b.pos + 7) & ~(usz)7;
 	if (b.pos / 8 + 384 > b.data.len) return CORRUPT~;
 	usz at = b.pos / 8;
@@ -145,17 +141,11 @@ fn void? Decoder.pcm_mb(&self, Slice* s, uint addr)
 	uint w = self.cur_sps.width_mbs;
 	uint x = (addr % w) * 16;
 	uint y = (addr / w) * 16;
-	for (uint j = 0; j < 16; j++)
-	{
-		for (uint i = 0; i < 16; i++) p.y[(usz)(y + j) * p.width + x + i] = b.data[at++];
-	}
+	for (uint j = 0; j < 16; j++, at += 16) p.y[(usz)(y + j) * p.width + x:16] = b.data[at:16];
 	uint cw = p.width / 2;
 	foreach (plane : (char[][]){ p.u, p.v })
 	{
-		for (uint j = 0; j < 8; j++)
-		{
-			for (uint i = 0; i < 8; i++) plane[(usz)(y / 2 + j) * cw + x / 2 + i] = b.data[at++];
-		}
+		for (uint j = 0; j < 8; j++, at += 8) plane[(usz)(y / 2 + j) * cw + x / 2:8] = b.data[at:8];
 	}
 	b.pos = at * 8;
 }
@@ -191,6 +181,15 @@ fn uint Decoder.predicted_mode(&self, Slice* s, uint addr, uint r)
 	return a < b ? a : b;
 }
 
+// nC from the neighbours' totals (9.2.1); -1 marks a missing neighbour.
+fn int nc_of(int na, int nb) @private
+{
+	if (na >= 0 && nb >= 0) return (na + nb + 1) >> 1;
+	if (na >= 0) return na;
+	if (nb >= 0) return nb;
+	return 0;
+}
+
 fn int Decoder.luma_nc(&self, Slice* s, uint addr, uint r)
 {
 	MbInfo* mb = &self.mbs[addr];
@@ -212,10 +211,7 @@ fn int Decoder.luma_nc(&self, Slice* s, uint addr, uint r)
 	{
 		nb = above.nz[r + 12];
 	}
-	if (na >= 0 && nb >= 0) return (na + nb + 1) >> 1;
-	if (na >= 0) return na;
-	if (nb >= 0) return nb;
-	return 0;
+	return nc_of(na, nb);
 }
 
 fn int Decoder.chroma_nc(&self, Slice* s, uint addr, uint c, uint k)
@@ -240,15 +236,18 @@ fn int Decoder.chroma_nc(&self, Slice* s, uint addr, uint c, uint k)
 	{
 		nb = above.nzc[base + k + 2];
 	}
-	if (na >= 0 && nb >= 0) return (na + nb + 1) >> 1;
-	if (na >= 0) return na;
-	if (nb >= 0) return nb;
-	return 0;
+	return nc_of(na, nb);
+}
+
+// Scan-order levels into raster positions; `first` is 1 for AC-only blocks.
+fn void unzigzag(int[16]* dst, int[16]* scan, uint first) @private
+{
+	for (uint k = first; k < 16; k++) (*dst)[ZIGZAG[k]] = (*scan)[k - first];
 }
 
 <*
  mb_qp_delta and the residual levels, into the scratch arrays (raster
- positions, not yet scaled); the totals into the macroblock.
+ positions, not yet scaled); the totals into the macroblock, which starts zeroed.
 *>
 fn void? Decoder.residual(&self, Slice* s, uint addr, uint cbp, bool i16)
 {
@@ -268,33 +267,19 @@ fn void? Decoder.residual(&self, Slice* s, uint addr, uint cbp, bool i16)
 	if (i16)
 	{
 		b.residual(self.luma_nc(s, addr, 0), 16, &scan)!;
-		for (uint k = 0; k < 16; k++) self.dc[ZIGZAG[k]] = scan[k];
+		unzigzag(&self.dc, &scan, 0);
 	}
-	for (uint blk = 0; blk < 16; blk++)
+	// Intra 16x16 sends the luma DCs separately, so its blocks carry AC only.
+	uint first = i16 ? 1 : 0;
+	foreach (blk, r : BLK_RASTER)
 	{
-		uint r = BLK_RASTER[blk];
-		if (!(cbp & (1 << (blk >> 2))))
-		{
-			mb.nz[r] = 0;
-			continue;
-		}
-		int nc = self.luma_nc(s, addr, r);
-		if (i16)
-		{
-			uint total = b.residual(nc, 15, &scan)!;
-			for (uint k = 0; k < 15; k++) self.coef[r][ZIGZAG[k + 1]] = scan[k];
-			mb.nz[r] = (char)total;
-		}
-		else
-		{
-			uint total = b.residual(nc, 16, &scan)!;
-			for (uint k = 0; k < 16; k++) self.coef[r][ZIGZAG[k]] = scan[k];
-			mb.nz[r] = (char)total;
-		}
+		if (!(cbp & (1 << (blk >> 2)))) continue;
+		mb.nz[r] = (char)b.residual(self.luma_nc(s, addr, r), 16 - first, &scan)!;
+		unzigzag(&self.coef[r], &scan, first);
 	}
 	uint chroma = cbp >> 4;
 	if (chroma > 2) return CORRUPT~;
-	if (chroma & 3)
+	if (chroma)
 	{
 		for (uint c = 0; c < 2; c++)
 		{
@@ -302,25 +287,19 @@ fn void? Decoder.residual(&self, Slice* s, uint addr, uint cbp, bool i16)
 			for (uint k = 0; k < 4; k++) self.ccoef[c][k][0] = scan[k];
 		}
 	}
-	for (uint c = 0; c < 2; c++)
+	if (chroma == 2)
 	{
-		for (uint k = 0; k < 4; k++)
+		for (uint c = 0; c < 2; c++)
 		{
-			if (chroma != 2)
+			for (uint k = 0; k < 4; k++)
 			{
-				mb.nzc[c * 4 + k] = 0;
-				continue;
+				mb.nzc[c * 4 + k] = (char)b.residual(self.chroma_nc(s, addr, c, k), 15, &scan)!;
+				unzigzag(&self.ccoef[c][k], &scan, 1);
 			}
-			uint total = b.residual(self.chroma_nc(s, addr, c, k), 15, &scan)!;
-			for (uint j = 0; j < 15; j++) self.ccoef[c][k][ZIGZAG[j + 1]] = scan[j];
-			mb.nzc[c * 4 + k] = (char)total;
 		}
 	}
 	if (b.overrun()) return CORRUPT~;
 }
-
-// ---------------------------------------------------------------------------
-// Inter macroblocks.
 
 fn void Decoder.skip_mb(&self, Slice* s, uint addr)
 {
@@ -330,18 +309,17 @@ fn void Decoder.skip_mb(&self, Slice* s, uint addr)
 	mb.pic = { id, id, id, id };
 	Near a = self.near(s, addr, 0, -1, 0);
 	Near b = self.near(s, addr, 0, 0, -1);
-	int mx;
-	int my;
+	int[<2>] mv;
 	if (a.avail && b.avail && !(a.ref == 0 && a.x == 0 && a.y == 0) && !(b.ref == 0 && b.x == 0 && b.y == 0))
 	{
-		self.mv_pred(s, addr, 0, 0, 0, 16, 16, 0, 0, &mx, &my);
+		mv = self.mv_pred(s, addr, 0, 0, 0, 16, 16, 0, 0);
 	}
 	for (uint i = 0; i < 16; i++)
 	{
-		mb.mv[2 * i] = (short)mx;
-		mb.mv[2 * i + 1] = (short)my;
+		mb.mv[2 * i] = (short)mv.x;
+		mb.mv[2 * i + 1] = (short)mv.y;
 	}
-	self.predict_inter(addr, self.list0[0], 0, 0, 16, 16, mx, my);
+	self.predict_inter(addr, self.list0[0], 0, 0, 16, 16, mv.x, mv.y);
 }
 
 <*
@@ -382,31 +360,22 @@ fn int median(int a, int b, int c) @private
  The predicted motion of the partition at (x, y), w x h, with `ref`; shape
  1 is 16x8, 2 is 8x16 (8.4.1.3).
 *>
-fn void Decoder.mv_pred(&self, Slice* s, uint addr, uint done, int x, int y, int w, int h, int ref, int shape, int* mx, int* my)
+fn int[<2>] Decoder.mv_pred(&self, Slice* s, uint addr, uint done, int x, int y, int w, int h, int ref, int shape)
 {
 	Near a = self.near(s, addr, done, x - 1, y);
 	Near b = self.near(s, addr, done, x, y - 1);
 	Near c = self.near(s, addr, done, x + w, y - 1);
 	if (!c.avail) c = self.near(s, addr, done, x - 1, y - 1);
+	// 16x8 and 8x16 partitions take one neighbour directly when its reference matches.
 	if (shape == 1)
 	{
 		Near* n = y == 0 ? &b : &a;
-		if (n.ref == ref)
-		{
-			*mx = n.x;
-			*my = n.y;
-			return;
-		}
+		if (n.ref == ref) return { n.x, n.y };
 	}
 	else if (shape == 2)
 	{
 		Near* n = x == 0 ? &a : &c;
-		if (n.ref == ref)
-		{
-			*mx = n.x;
-			*my = n.y;
-			return;
-		}
+		if (n.ref == ref) return { n.x, n.y };
 	}
 	if (!b.avail && !c.avail && a.avail)
 	{
@@ -417,34 +386,27 @@ fn void Decoder.mv_pred(&self, Slice* s, uint addr, uint done, int x, int y, int
 	if (same == 1)
 	{
 		Near* n = a.ref == ref ? &a : b.ref == ref ? &b : &c;
-		*mx = n.x;
-		*my = n.y;
-		return;
+		return { n.x, n.y };
 	}
-	*mx = median(a.x, b.x, c.x);
-	*my = median(a.y, b.y, c.y);
+	return { median(a.x, b.x, c.x), median(a.y, b.y, c.y) };
 }
 
 // A partition's motion into the macroblock, and its prediction drawn.
 fn void Decoder.partition(&self, Slice* s, uint addr, uint* done, int x, int y, int w, int h, int ref, int shape, int dx, int dy)
 {
 	MbInfo* mb = &self.mbs[addr];
-	int mx;
-	int my;
-	self.mv_pred(s, addr, *done, x, y, w, h, ref, shape, &mx, &my);
-	mx += dx;
-	my += dy;
+	int[<2>] mv = self.mv_pred(s, addr, *done, x, y, w, h, ref, shape) + { dx, dy };
 	for (int j = y >> 2; j < (y + h) >> 2; j++)
 	{
 		for (int i = x >> 2; i < (x + w) >> 2; i++)
 		{
 			uint r = (uint)(i + j * 4);
-			mb.mv[2 * r] = (short)mx;
-			mb.mv[2 * r + 1] = (short)my;
+			mb.mv[2 * r] = (short)mv.x;
+			mb.mv[2 * r + 1] = (short)mv.y;
 			*done |= 1u << r;
 		}
 	}
-	self.predict_inter(addr, self.list0[ref], x, y, w, h, mx, my);
+	self.predict_inter(addr, self.list0[ref], x, y, w, h, mv.x, mv.y);
 }
 
 fn void? Decoder.inter_mb(&self, Slice* s, uint addr, uint t)
@@ -503,6 +465,8 @@ fn void? Decoder.inter_mb(&self, Slice* s, uint addr, uint t)
 			uint r = t == 3 && top > 0 ? b.te(top) : 0;
 			if (r > top) return CORRUPT~;
 			ref[q] = (int)r;
+			mb.ref[q] = (ichar)r;
+			mb.pic[q] = (int)self.list0[r].id;
 		}
 		int[2][4][4] mvd;
 		for (uint q = 0; q < 4; q++)
@@ -513,11 +477,6 @@ fn void? Decoder.inter_mb(&self, Slice* s, uint addr, uint t)
 				mvd[q][k][0] = b.se();
 				mvd[q][k][1] = b.se();
 			}
-		}
-		for (uint q = 0; q < 4; q++)
-		{
-			mb.ref[q] = (ichar)ref[q];
-			mb.pic[q] = (int)self.list0[ref[q]].id;
 		}
 		for (uint q = 0; q < 4; q++)
 		{

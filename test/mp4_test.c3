@@ -1,5 +1,4 @@
 module image::mp4::check;
-import image;
 import image::mp4;
 import image::h264;
 import std::io;
@@ -54,21 +53,21 @@ fn void matches(String video, String dump, uint width, uint height, usz frames)
 	defer alloc::free(mem, raw);
 	mp4::Video v = mp4::open(video)!!;
 	defer v.close();
-	assert(v.width == width && v.height == height, "size %dx%d", v.width, v.height);
-	assert(v.frames == frames, "%d frames", v.frames);
-	assert(v.fps > 23.9 && v.fps < 24.1, "fps %f", v.fps);
+	test::@check(v.width == width && v.height == height, "size %dx%d", v.width, v.height);
+	test::@check(v.frames == frames, "%d frames", v.frames);
+	test::@check(v.fps > 23.9 && v.fps < 24.1, "fps %f", v.fps);
 	for (usz k = 0; k < frames; k++)
 	{
 		usz bad = differences(&v, raw, k);
-		assert(bad == 0, "%s frame %d: %d samples differ", video, k, bad);
+		test::@check(bad == 0, "%s frame %d: %d samples differ", video, k, bad);
 	}
 	// Back to the start, and a jump past a sync frame, decode the same.
-	assert(differences(&v, raw, 0) == 0);
-	assert(differences(&v, raw, frames - 1) == 0);
+	test::@check(differences(&v, raw, 0) == 0);
+	test::@check(differences(&v, raw, frames - 1) == 0);
 }
 
 module image::mp4::test @test;
-import image;
+
 import image::mp4;
 import image::h264;
 import image::mp4::check;
@@ -89,20 +88,20 @@ fn void mp4_frame_is_rgb()
 	defer v.close();
 	Image img = v.frame(3)!!;
 	defer img.free();
-	assert(img.width == 70 && img.height == 46 && img.format == RGB && img.pixels.len == 70 * 46 * 3);
+	test::@check(img.width == 70 && img.height == 46 && img.format == RGB && img.pixels.len == 70 * 46 * 3);
 }
 
 fn void mp4_high_profile_is_refused()
 {
 	if (catch err = mp4::open("test/high_64x48.mp4"))
 	{
-		assert(err == h264::CABAC || err == h264::B_SLICES || err == h264::TRANSFORM_8X8, "refused with %s", err);
+		test::@check(err == h264::CABAC || err == h264::B_SLICES || err == h264::TRANSFORM_8X8, "refused with %s", err);
 		return;
 	}
-	assert(false, "a High-profile stream opened");
+	test::@check(false, "a High-profile stream opened");
 }
 
 fn void mp4_not_a_video_is_refused()
 {
-	assert(@catch(mp4::open("test/test_rgb.png")) == mp4::NOT_MP4);
+	test::@error(mp4::open("test/test_rgb.png"), mp4::NOT_MP4);
 }

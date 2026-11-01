@@ -1,10 +1,9 @@
 module image::jpeg::huffman;
-
-faultdef INVALID_HUFFMAN_TABLE, INVALID_BITSTREAM, UNEXPECTED_EOF;
+import image::jpeg;
 
 const uint FAST_BITS    = 9;
 const uint FAST_SIZE    = 1 << FAST_BITS;
-const ushort FAST_EMPTY = 0xFFFF;
+const ushort FAST_EMPTY @private = 0xFFFF;
 
 // JPEG zigzag order: index in natural row-major order for each zigzag position.
 const char[64] ZIGZAG = {
@@ -32,22 +31,20 @@ struct HuffmanTable
 <*
  Build a JPEG Huffman table from BITS[16] (counts per code length 1..16)
  and HUFFVAL[] (symbols ordered by code length).
+
+ @require bits.len == 16 : "BITS holds one count per code length"
+
+ @return? jpeg::INVALID_HUFFMAN_TABLE
 *>
 fn void? HuffmanTable.build(&self, char[] bits, char[] values)
 {
-	if (bits.len < 16) return INVALID_HUFFMAN_TABLE~;
+	sz total;
+	foreach (count : bits) total += count;
+	if (total > 256 || total > values.len) return jpeg::INVALID_HUFFMAN_TABLE~;
 
-	sz total = 0;
-	for (uint i = 0; i < 16; i++) total += (sz)bits[i];
-	if (total > 256 || total > values.len) return INVALID_HUFFMAN_TABLE~;
-
-	*self = { };
-	self.defined = true;
-	self.num_values = (int)total;
-	for (sz i = 0; i < total; i++) self.values[i] = values[i];
-
-	// Initialize fast lookup to "empty" sentinel.
-	for (uint i = 0; i < FAST_SIZE; i++) self.fast[i] = FAST_EMPTY;
+	*self = { .defined = true, .num_values = (int)total };
+	self.values[:total] = values[:total];
+	self.fast[..] = FAST_EMPTY;
 
 	// Canonical code generation (JPEG Annex C / ITU T.81 figure C.2-C.3).
 	int code = 0;
@@ -57,12 +54,12 @@ fn void? HuffmanTable.build(&self, char[] bits, char[] values)
 		uint count = (uint)bits[len - 1];
 		if (count == 0)
 		{
-			self.mincode[len] = 0;
 			self.maxcode[len] = -1;
-			self.valptr[len] = 0;
 			code <<= 1;
 			continue;
 		}
+		// More codes than fit in `len` bits would overflow the lookup tables.
+		if (code + (int)count > 1 << len) return jpeg::INVALID_HUFFMAN_TABLE~;
 		self.valptr[len] = idx;
 		self.mincode[len] = code;
 		self.maxcode[len] = code + (int)count - 1;
@@ -85,7 +82,6 @@ fn void? HuffmanTable.build(&self, char[] bits, char[] values)
 		idx += (int)count;
 		code <<= 1;
 	}
-	return;
 }
 
 struct BitReader
@@ -131,8 +127,7 @@ fn void BitReader.refill(&self)
 			char nx = self.data[self.pos];
 			if (nx == 0x00)
 			{
-				self.pos++;
-				// emit 0xFF
+				self.pos++;  // 0xFF 0x00 is a stuffed literal 0xFF
 			}
 			else
 			{
@@ -165,7 +160,7 @@ fn int? BitReader.receive(&self, uint n)
 	if (self.bits < (int)n)
 	{
 		self.refill();
-		if (self.bits < (int)n) return UNEXPECTED_EOF~;
+		if (self.bits < (int)n) return jpeg::UNEXPECTED_EOF~;
 	}
 	uint v = self.peek(n);
 	self.consume(n);
@@ -179,23 +174,16 @@ fn int? BitReader.receive_extend(&self, uint n)
 {
 	if (n == 0) return 0;
 	int v = self.receive(n)!;
-	if (v < (1 << (n - 1)))
-	{
-		v += (-1 << n) + 1;
-	}
+	if (v < (1 << (n - 1))) v += (-1 << n) + 1;
 	return v;
 }
 
-fn void BitReader.flush_to_byte(&self)
-{
-	int drop = self.bits & 7;
-	self.consume((uint)drop);
-}
+fn void BitReader.flush_to_byte(&self) => self.consume((uint)self.bits & 7);
 
 fn int? BitReader.decode_symbol(&self, HuffmanTable* tbl)
 {
 	if (self.bits < 16) self.refill();
-	if (self.bits == 0) return INVALID_BITSTREAM~;
+	if (self.bits == 0) return jpeg::INVALID_BITSTREAM~;
 
 	// Fast path. Buffer is MSB-aligned, so high `bits` are real and the rest
 	// are zero — a valid index for a code of length <= bits.
@@ -218,33 +206,43 @@ fn int? BitReader.decode_symbol(&self, HuffmanTable* tbl)
 		if (self.bits < (int)len)
 		{
 			self.refill();
-			if (self.bits < (int)len) return INVALID_BITSTREAM~;
+			if (self.bits < (int)len) return jpeg::INVALID_BITSTREAM~;
 		}
 		int code = (int)self.peek(len);
 		if (code <= tbl.maxcode[len])
 		{
 			self.consume(len);
 			int j = tbl.valptr[len] + (code - tbl.mincode[len]);
-			if (j < 0 || j >= tbl.num_values) return INVALID_BITSTREAM~;
+			if (j < 0 || j >= tbl.num_values) return jpeg::INVALID_BITSTREAM~;
 			return (int)tbl.values[j];
 		}
 	}
-	return INVALID_BITSTREAM~;
+	return jpeg::INVALID_BITSTREAM~;
 }
 
 <*
- Decode one 8x8 block of DCT coefficients into `coeffs` (in natural row-major order),
- starting from a zeroed buffer. Updates `dc_pred` in place.
-*>
-fn void? decode_block(BitReader* br, HuffmanTable* dc_tbl, HuffmanTable* ac_tbl, int* coeffs, int* dc_pred)
-{
-	for (int i = 0; i < 64; i++) coeffs[i] = 0;
+ Decode a DC difference and add it to `dc_pred`.
 
+ @return "The new DC value"
+ @return? jpeg::INVALID_BITSTREAM, jpeg::UNEXPECTED_EOF
+*>
+fn int? decode_dc(BitReader* br, HuffmanTable* dc_tbl, int* dc_pred)
+{
 	int t = br.decode_symbol(dc_tbl)!;
-	if (t < 0 || t > 15) return INVALID_BITSTREAM~;
-	int diff = br.receive_extend((uint)t)!;
-	*dc_pred += diff;
-	coeffs[0] = *dc_pred;
+	if (t > 15) return jpeg::INVALID_BITSTREAM~;
+	*dc_pred += br.receive_extend((uint)t)!;
+	return *dc_pred;
+}
+
+<*
+ Decode one 8x8 block of DCT coefficients into `coeffs` (natural row-major order),
+ which must start zeroed. Updates `dc_pred` in place.
+
+ @return? jpeg::INVALID_BITSTREAM, jpeg::UNEXPECTED_EOF
+*>
+fn void? decode_block(BitReader* br, HuffmanTable* dc_tbl, HuffmanTable* ac_tbl, int[64]* coeffs, int* dc_pred)
+{
+	(*coeffs)[0] = decode_dc(br, dc_tbl, dc_pred)!;
 
 	int k = 1;
 	while (k < 64)
@@ -262,10 +260,8 @@ fn void? decode_block(BitReader* br, HuffmanTable* dc_tbl, HuffmanTable* ac_tbl,
 			break; // EOB
 		}
 		k += r;
-		if (k >= 64) return INVALID_BITSTREAM~;
-		int v = br.receive_extend((uint)s)!;
-		coeffs[ZIGZAG[k]] = v;
+		if (k >= 64) return jpeg::INVALID_BITSTREAM~;
+		(*coeffs)[ZIGZAG[k]] = br.receive_extend((uint)s)!;
 		k++;
 	}
-	return;
 }

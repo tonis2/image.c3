@@ -1,20 +1,36 @@
 module image::h264;
 
 // LevelScale for flat matrices (8.5.9): by qP % 6 and position class.
-const int[3][6] LEVEL_SCALE = { { 10, 16, 13 }, { 11, 18, 14 }, { 13, 20, 16 }, { 14, 23, 18 }, { 16, 25, 20 }, { 18, 29, 23 } };
-const char[16] SCALE_CLASS = { 0, 2, 0, 2, 2, 1, 2, 1, 0, 2, 0, 2, 2, 1, 2, 1 };
+const int[3][6] LEVEL_SCALE @private = { { 10, 16, 13 }, { 11, 18, 14 }, { 13, 20, 16 }, { 14, 23, 18 }, { 16, 25, 20 }, { 18, 29, 23 } };
+const char[16] SCALE_CLASS @private = { 0, 2, 0, 2, 2, 1, 2, 1, 0, 2, 0, 2, 2, 1, 2, 1 };
 // QPc from qPi (Table 8-15).
-const char[52] CHROMA_QP = {
+const char[52] CHROMA_QP @private = {
 	0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29,
 	29, 30, 31, 32, 32, 33, 34, 34, 35, 35, 36, 36, 37, 37, 37, 38, 38, 38, 39, 39, 39, 39 };
 
-fn int clip1(int v) @inline => v < 0 ? 0 : v > 255 ? 255 : v;
-fn int clip3(int lo, int hi, int v) @inline => v < lo ? lo : v > hi ? hi : v;
+fn int clip1(int v) @inline @private => v < 0 ? 0 : v > 255 ? 255 : v;
+fn int clip3(int lo, int hi, int v) @inline @private => v < lo ? lo : v > hi ? hi : v;
 
-fn int chroma_qp(int qp, int offset) => CHROMA_QP[clip3(0, 51, qp + offset)];
+fn int clip_qp(int qp) @inline @private => clip3(0, 51, qp);
+fn int chroma_qp(int qp, int offset) @private => CHROMA_QP[clip_qp(qp + offset)];
 
-// ---------------------------------------------------------------------------
-// Residual.
+// The flat-matrix scale for a DC level at `qp`.
+fn int dc_scale(int qp) @inline @private => LEVEL_SCALE[qp % 6][0] * 16;
+
+// Scale levels c[first..15] into d (8.5.12.1); true when any is nonzero.
+fn bool dequant(int[16]* c, int[16]* d, int qp, uint first) @private
+{
+	bool nonzero;
+	int shift = qp / 6;
+	int[3] scale = LEVEL_SCALE[qp % 6];
+	for (uint k = first; k < 16; k++)
+	{
+		if ((*c)[k] == 0) continue;
+		(*d)[k] = ((*c)[k] * scale[SCALE_CLASS[k]]) << shift;
+		nonzero = true;
+	}
+	return nonzero;
+}
 
 // The 4x4 inverse transform of `d` (raster) added to the samples at `at`.
 fn void idct_add(int* d, char[] plane, usz at, usz stride) @private
@@ -60,7 +76,7 @@ fn void Decoder.luma_dc(&self, int qp)
 		f[i * 4 + 2] = r[0] - r[1] - r[2] + r[3];
 		f[i * 4 + 3] = r[0] - r[1] + r[2] - r[3];
 	}
-	int scale = LEVEL_SCALE[qp % 6][0] * 16;
+	int scale = dc_scale(qp);
 	for (int j = 0; j < 4; j++)
 	{
 		int[4] g = {
@@ -79,16 +95,8 @@ fn void Decoder.luma_dc(&self, int qp)
 // Luma block `r`'s residual scaled and added; with `i16` its DC is the transformed one.
 fn void Decoder.add_luma(&self, uint addr, uint r, int qp, bool i16)
 {
-	int* c = &self.coef[r];
 	int[16] d;
-	bool nonzero;
-	int shift = qp / 6;
-	for (int k = i16 ? 1 : 0; k < 16; k++)
-	{
-		if (c[k] == 0) continue;
-		d[k] = (c[k] * LEVEL_SCALE[qp % 6][SCALE_CLASS[k]]) << shift;
-		nonzero = true;
-	}
+	bool nonzero = dequant(&self.coef[r], &d, qp, i16 ? 1 : 0);
 	if (i16)
 	{
 		d[0] = self.dc[r];
@@ -110,7 +118,7 @@ fn void Decoder.add_chroma(&self, uint addr, int qp_y, Slice* s)
 	usz cw = p.width / 2;
 	usz x = (usz)(addr % w) * 8;
 	usz y = (usz)(addr / w) * 8;
-	for (uint c = 0; c < 2; c++)
+	foreach (c, plane : (char[][]){ p.u, p.v })
 	{
 		int qp = chroma_qp(qp_y, c == 0 ? s.pps.cb_qp_offset : s.pps.cr_qp_offset);
 		int c0 = self.ccoef[c][0][0];
@@ -118,29 +126,17 @@ fn void Decoder.add_chroma(&self, uint addr, int qp_y, Slice* s)
 		int c2 = self.ccoef[c][2][0];
 		int c3 = self.ccoef[c][3][0];
 		int[4] f = { c0 + c1 + c2 + c3, c0 - c1 + c2 - c3, c0 + c1 - c2 - c3, c0 - c1 - c2 + c3 };
-		int scale = LEVEL_SCALE[qp % 6][0] * 16;
-		char[] plane = c == 0 ? p.u : p.v;
+		int scale = dc_scale(qp);
 		for (uint k = 0; k < 4; k++)
 		{
-			int* a = &self.ccoef[c][k];
 			int[16] d;
-			bool nonzero;
 			d[0] = ((f[k] * scale) << (qp / 6)) >> 5;
-			if (d[0] != 0) nonzero = true;
-			for (int j = 1; j < 16; j++)
-			{
-				if (a[j] == 0) continue;
-				d[j] = (a[j] * LEVEL_SCALE[qp % 6][SCALE_CLASS[j]]) << (qp / 6);
-				nonzero = true;
-			}
-			if (!nonzero) continue;
+			bool nonzero = dequant(&self.ccoef[c][k], &d, qp, 1);
+			if (!nonzero && d[0] == 0) continue;
 			idct_add(&d, plane, (y + (usz)(k >> 1) * 4) * cw + x + (usz)(k & 1) * 4, cw);
 		}
 	}
 }
-
-// ---------------------------------------------------------------------------
-// Intra prediction.
 
 fn void? Decoder.intra4x4(&self, Slice* s, uint addr, uint r)
 {
@@ -322,6 +318,25 @@ fn int top_at(int[8]* t, int q, int i) @inline @private => i < 0 ? q : (*t)[i];
 // p[-1, i] for i >= -1.
 fn int left_at(int[4]* l, int q, int i) @inline @private => i < 0 ? q : (*l)[i];
 
+<*
+ Plane prediction's a, b and c (8.3.3.4, 8.3.4.4) from the top row, left column and corner.
+
+ @require t.len == l.len && (t.len == 16 || t.len == 8) : "16 luma or 8 chroma neighbours"
+*>
+fn int[<3>] plane_params(int[] t, int[] l, int q, int scale) @private
+{
+	int half = (int)t.len / 2;
+	int h;
+	int v;
+	for (int i = 0; i < half; i++)
+	{
+		int k = half - 2 - i;
+		h += (i + 1) * (t[half + i] - (k >= 0 ? t[k] : q));
+		v += (i + 1) * (l[half + i] - (k >= 0 ? l[k] : q));
+	}
+	return { 16 * (l[^1] + t[^1]), (scale * h + 32) >> 6, (scale * v + 32) >> 6 };
+}
+
 fn void? Decoder.intra16x16(&self, Slice* s, uint addr, uint mode)
 {
 	bool has_left = self.intra_mb(s, addr, -1, 0) != null;
@@ -363,22 +378,8 @@ fn void? Decoder.intra16x16(&self, Slice* s, uint addr, uint mode)
 	{
 		dc = (sum_t + 8) >> 4;
 	}
-	int a;
-	int b;
-	int c;
-	if (mode == 3)
-	{
-		int h;
-		int v;
-		for (int i = 0; i < 8; i++)
-		{
-			h += (i + 1) * (t[8 + i] - (6 - i >= 0 ? t[6 - i] : q));
-			v += (i + 1) * (l[8 + i] - (6 - i >= 0 ? l[6 - i] : q));
-		}
-		a = 16 * (l[15] + t[15]);
-		b = (5 * h + 32) >> 6;
-		c = (5 * v + 32) >> 6;
-	}
+	int[<3>] abc;
+	if (mode == 3) abc = plane_params(&t, &l, q, 5);
 	for (int y = 0; y < 16; y++)
 	{
 		for (int x = 0; x < 16; x++)
@@ -389,7 +390,7 @@ fn void? Decoder.intra16x16(&self, Slice* s, uint addr, uint mode)
 				case 0: val = t[x];
 				case 1: val = l[y];
 				case 2: val = dc;
-				default: val = clip1((a + b * (x - 7) + c * (y - 7) + 16) >> 5);
+				default: val = clip1((abc[0] + abc[1] * (x - 7) + abc[2] * (y - 7) + 16) >> 5);
 			}
 			p.y[at + (usz)y * stride + (usz)x] = (char)val;
 		}
@@ -419,22 +420,8 @@ fn void? Decoder.intra_chroma(&self, Slice* s, uint addr, uint mode)
 		if (has_top) for (usz i = 0; i < 8; i++) t[i] = plane[at - stride + i];
 		if (has_left) for (usz i = 0; i < 8; i++) l[i] = plane[at + i * stride - 1];
 		int q = has_corner ? plane[at - stride - 1] : 0;
-		int a;
-		int b;
-		int c;
-		if (mode == 3)
-		{
-			int h;
-			int v;
-			for (int i = 0; i < 4; i++)
-			{
-				h += (i + 1) * (t[4 + i] - (2 - i >= 0 ? t[2 - i] : q));
-				v += (i + 1) * (l[4 + i] - (2 - i >= 0 ? l[2 - i] : q));
-			}
-			a = 16 * (l[7] + t[7]);
-			b = (34 * h + 32) >> 6;
-			c = (34 * v + 32) >> 6;
-		}
+		int[<3>] abc;
+		if (mode == 3) abc = plane_params(&t, &l, q, 34);
 		for (int k = 0; k < 4; k++)
 		{
 			int ox = (k & 1) * 4;
@@ -444,7 +431,8 @@ fn void? Decoder.intra_chroma(&self, Slice* s, uint addr, uint mode)
 			{
 				int st = t[ox] + t[ox + 1] + t[ox + 2] + t[ox + 3];
 				int sl = l[oy] + l[oy + 1] + l[oy + 2] + l[oy + 3];
-				if ((ox == 0 && oy == 0) || (ox > 0 && oy > 0))
+				// Blocks 0 and 3 average both edges; 1 prefers the top, 2 the left (8.3.4.1-3).
+				if (k == 0 || k == 3)
 				{
 					if (has_top && has_left)
 					{
@@ -492,7 +480,7 @@ fn void? Decoder.intra_chroma(&self, Slice* s, uint addr, uint mode)
 						case 0: val = dc;
 						case 1: val = l[y];
 						case 2: val = t[x];
-						default: val = clip1((a + b * (x - 3) + c * (y - 3) + 16) >> 5);
+						default: val = clip1((abc[0] + abc[1] * (x - 3) + abc[2] * (y - 3) + 16) >> 5);
 					}
 					plane[at + (usz)y * stride + (usz)x] = (char)val;
 				}
@@ -501,9 +489,7 @@ fn void? Decoder.intra_chroma(&self, Slice* s, uint addr, uint mode)
 	}
 }
 
-// ---------------------------------------------------------------------------
 // Inter prediction (8.4.2.2): luma at quarter samples, chroma at eighths.
-
 fn int tap6(int a, int b, int c, int d, int e, int f) @inline @private => a - 5 * b + 20 * c + 20 * d - 5 * e + f;
 
 // Unrounded half sample between (x, y) and (x + 1, y).
@@ -558,6 +544,8 @@ fn int luma_sample(int* p, int ps, int x, int y, int fx, int fy) @private
 <*
  The w x h partition at (x, y) in macroblock `addr` predicted from `ref`
  moved by (mx, my) quarter samples, into the current picture.
+
+ @require w <= 16 && h <= 16 : "Partitions are at most 16x16"
 *>
 fn void Decoder.predict_inter(&self, uint addr, Picture* ref, int x, int y, int w, int h, int mx, int my)
 {

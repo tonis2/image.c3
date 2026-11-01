@@ -5,12 +5,11 @@ module image::h264;
  I/P slices (Constrained Baseline, and Main/High streams that keep to it).
  Anything else is refused with the fault naming what it needs.
 *>
-faultdef CABAC, B_SLICES, INTERLACED, TRANSFORM_8X8, SAMPLING, SLICE_GROUPS, WEIGHTED, SCALING_LISTS, UNSUPPORTED, CORRUPT, NO_PARAMETERS;
+excuse CABAC, B_SLICES, INTERLACED, TRANSFORM_8X8, SAMPLING, SLICE_GROUPS, WEIGHTED, SCALING_LISTS, UNSUPPORTED, CORRUPT, NO_PARAMETERS;
 
-struct Sps
+struct Sps @private
 {
 	bool valid;
-	uint profile;
 	uint log2_max_frame_num;
 	uint poc_type;
 	uint log2_max_poc_lsb;
@@ -26,7 +25,7 @@ struct Sps
 	uint matrix;      // matrix_coefficients; 2 = unspecified
 }
 
-struct Pps
+struct Pps @private
 {
 	bool valid;
 	uint sps_id;
@@ -58,11 +57,11 @@ fn void? Decoder.read_sps(&self, Bits* b)
 	b.skip(16);
 	uint id = b.ue();
 	if (id > 31) return CORRUPT~;
-	Sps s = { .profile = profile, .matrix = 2 };
+	Sps s = { .matrix = 2 };
 	if (high_profile(profile))
 	{
+		// Anything but 4:2:0 is refused, so 4:4:4's extra flag needn't be skipped.
 		uint chroma = b.ue();
-		if (chroma == 3) b.skip(1);
 		uint depth_luma = b.ue();
 		uint depth_chroma = b.ue();
 		bool bypass = b.flag();

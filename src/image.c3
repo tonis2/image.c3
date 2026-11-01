@@ -1,13 +1,16 @@
 module image;
+import std::math;
 
-enum PixelFormat : char {
+enum PixelFormat : char
+{
 	GRAYSCALE,
 	GRAYSCALE_ALPHA,
 	RGB,
 	RGBA,
 }
 
-struct Image {
+struct Image
+{
 	uint width;
 	uint height;
 	char bit_depth;
@@ -16,19 +19,33 @@ struct Image {
 	Allocator allocator;
 }
 
-fn sz Image.bytes_per_pixel(&self) {
+<*
+ Bytes per pixel, counting every channel at the image's bit depth.
+*>
+fn sz Image.bytes_per_pixel(&self)
+{
 	sz channels;
-	switch (self.format) {
+	switch (self.format)
+	{
 		case GRAYSCALE: channels = 1;
 		case GRAYSCALE_ALPHA: channels = 2;
 		case RGB: channels = 3;
 		case RGBA: channels = 4;
 	}
-	sz bytes_per_channel = self.bit_depth == 16 ? 2 : 1;
-	return channels * bytes_per_channel;
+	return self.bit_depth == 16 ? channels * 2 : channels;
 }
 
-fn Image Image.resize(&self, uint new_width, uint new_height, Allocator allocator = mem) {
+<*
+ Bilinear resize into a new image owned by `allocator`.
+
+ @require self.bit_depth == 8 : "Only 8-bit images can be resized"
+ @require self.width > 0 && self.height > 0 : "Source image is empty"
+ @require new_width > 0 && new_height > 0 : "Target size must be positive"
+
+ @return "The resized image; free it with Image.free"
+*>
+fn Image Image.resize(&self, uint new_width, uint new_height, Allocator allocator = mem)
+{
 	sz bpp = self.bytes_per_pixel();
 	sz src_stride = (sz)self.width * bpp;
 	sz dst_stride = (sz)new_width * bpp;
@@ -36,21 +53,17 @@ fn Image Image.resize(&self, uint new_width, uint new_height, Allocator allocato
 
 	for (uint y = 0; y < new_height; y++)
 	{
-		// Map destination y to source y (center of pixel)
-		float src_yf = ((float)y + 0.5) * (float)self.height / (float)new_height - 0.5;
-		if (src_yf < 0) src_yf = 0;
+		// Sample at pixel centres so the image doesn't shift by half a pixel.
+		float src_yf = math::max(((float)y + 0.5f) * (float)self.height / (float)new_height - 0.5f, 0.0f);
 		uint sy0 = (uint)src_yf;
-		uint sy1 = sy0 + 1;
-		if (sy1 >= self.height) sy1 = self.height - 1;
+		uint sy1 = math::min(sy0 + 1, self.height - 1);
 		float fy = src_yf - (float)sy0;
 
 		for (uint x = 0; x < new_width; x++)
 		{
-			float src_xf = ((float)x + 0.5) * (float)self.width / (float)new_width - 0.5;
-			if (src_xf < 0) src_xf = 0;
+			float src_xf = math::max(((float)x + 0.5f) * (float)self.width / (float)new_width - 0.5f, 0.0f);
 			uint sx0 = (uint)src_xf;
-			uint sx1 = sx0 + 1;
-			if (sx1 >= self.width) sx1 = self.width - 1;
+			uint sx1 = math::min(sx0 + 1, self.width - 1);
 			float fx = src_xf - (float)sx0;
 
 			sz i00 = (sz)sy0 * src_stride + (sz)sx0 * bpp;
@@ -61,15 +74,11 @@ fn Image Image.resize(&self, uint new_width, uint new_height, Allocator allocato
 
 			for (sz c = 0; c < bpp; c++)
 			{
-				float v00 = (float)self.pixels[i00 + c];
-				float v10 = (float)self.pixels[i10 + c];
-				float v01 = (float)self.pixels[i01 + c];
-				float v11 = (float)self.pixels[i11 + c];
-				float v = v00 * (1 - fx) * (1 - fy) + v10 * fx * (1 - fy)
-				        + v01 * (1 - fx) * fy + v11 * fx * fy;
-				if (v < 0) v = 0;
-				if (v > 255) v = 255;
-				dst_pixels[dst_off + c] = (char)(uint)v;
+				float v = (float)self.pixels[i00 + c] * (1 - fx) * (1 - fy)
+				        + (float)self.pixels[i10 + c] * fx * (1 - fy)
+				        + (float)self.pixels[i01 + c] * (1 - fx) * fy
+				        + (float)self.pixels[i11 + c] * fx * fy;
+				dst_pixels[dst_off + c] = (char)math::clamp(v, 0.0f, 255.0f);
 			}
 		}
 	}
@@ -84,45 +93,50 @@ fn Image Image.resize(&self, uint new_width, uint new_height, Allocator allocato
 	};
 }
 
-// Returns a freshly-allocated RGBA8 byte buffer for `self`. Single-channel and
-// RGB inputs are expanded; alpha defaults to 0xff. The result is always a new
-// allocation owned by the caller — free with `alloc::free(allocator, ...)`.
-// 16-bit images are not handled here; convert to 8-bit first.
-fn char[] Image.to_rgba(&self, Allocator allocator = mem) {
+<*
+ Expand the image to RGBA8; missing alpha becomes 0xff.
+
+ @require self.bit_depth == 8 : "Only 8-bit images can be converted"
+
+ @return "A new buffer owned by the caller; free with alloc::free(allocator, ...)"
+*>
+fn char[] Image.to_rgba(&self, Allocator allocator = mem)
+{
 	sz pixel_count = (sz)self.width * (sz)self.height;
 	char[] result = alloc::new_array(allocator, char, pixel_count * 4);
-	switch (self.format) {
+	switch (self.format)
+	{
 		case RGBA:
-			mem::copy(result.ptr, self.pixels.ptr, pixel_count * 4);
+			result[..] = self.pixels[:pixel_count * 4];
 		case RGB:
-			for (sz p = 0; p < pixel_count; p++) {
-				result[p * 4 + 0] = self.pixels[p * 3 + 0];
-				result[p * 4 + 1] = self.pixels[p * 3 + 1];
-				result[p * 4 + 2] = self.pixels[p * 3 + 2];
-				result[p * 4 + 3] = (char)0xff;
+			for (sz p = 0; p < pixel_count; p++)
+			{
+				result[p * 4 : 3] = self.pixels[p * 3 : 3];
+				result[p * 4 + 3] = 0xff;
 			}
 		case GRAYSCALE:
-			for (sz p = 0; p < pixel_count; p++) {
-				char g = self.pixels[p];
-				result[p * 4 + 0] = g;
-				result[p * 4 + 1] = g;
-				result[p * 4 + 2] = g;
-				result[p * 4 + 3] = (char)0xff;
+			foreach (p, g : self.pixels[:pixel_count])
+			{
+				result[p * 4 : 3] = g;
+				result[p * 4 + 3] = 0xff;
 			}
 		case GRAYSCALE_ALPHA:
-			for (sz p = 0; p < pixel_count; p++) {
-				char g = self.pixels[p * 2 + 0];
-				result[p * 4 + 0] = g;
-				result[p * 4 + 1] = g;
-				result[p * 4 + 2] = g;
+			for (sz p = 0; p < pixel_count; p++)
+			{
+				result[p * 4 : 3] = self.pixels[p * 2];
 				result[p * 4 + 3] = self.pixels[p * 2 + 1];
 			}
 	}
 	return result;
 }
 
-fn void Image.free(&self) {
-	if (self.pixels.len > 0 && self.allocator) {
+<*
+ Free the pixel buffer; safe to call twice.
+*>
+fn void Image.free(&self)
+{
+	if (self.pixels.len > 0 && self.allocator)
+	{
 		alloc::free(self.allocator, self.pixels);
 		self.pixels = {};
 	}

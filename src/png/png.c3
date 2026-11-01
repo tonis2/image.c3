@@ -6,12 +6,18 @@ import image::png::zlib;
 import std::io::file;
 import std::collections::list;
 
-faultdef INVALID_SIGNATURE,
-         MISSING_PALETTE,
-         INCOMPLETE_DATA,
-         INVALID_IMAGE_DATA;
+excuse INVALID_SIGNATURE,
+       MISSING_PALETTE,
+       INCOMPLETE_DATA,
+       INVALID_IMAGE_DATA;
 
-fn Image? load_file(String path, Allocator allocator = mem) {
+<*
+ Load and decode a PNG file.
+
+ @return? INVALID_SIGNATURE, MISSING_PALETTE, INCOMPLETE_DATA, file::load!, load_bytes!
+*>
+fn Image? load_file(String path, Allocator allocator = mem)
+{
 	char[] file_data = file::load(allocator, path)!;
 	defer alloc::free(allocator, file_data);
 	return load_bytes(file_data, allocator);
@@ -19,86 +25,61 @@ fn Image? load_file(String path, Allocator allocator = mem) {
 
 fn Image? tload_file(String path) => load_file(path, tmem);
 
-fn Image? load_bytes(char[] data, Allocator allocator = mem) {
-	// Verify PNG signature
-	if (!chunks::verify_signature(data)) {
-		return INVALID_SIGNATURE~;
-	}
+<*
+ Decode a PNG held in memory. Indexed images are expanded to RGB, or RGBA when tRNS is present.
 
-	sz offset = 8; // Skip signature
+ @return "The decoded image; free it with Image.free"
+ @return? INVALID_SIGNATURE, MISSING_PALETTE, INCOMPLETE_DATA, chunks::parse_chunk!, chunks::parse_ihdr!, zlib::decompress!, filters::reconstruct!
+*>
+fn Image? load_bytes(char[] data, Allocator allocator = mem)
+{
+	if (!chunks::verify_signature(data)) return INVALID_SIGNATURE~;
 
-	// Parse IHDR (must be first chunk)
+	sz offset = 8;
 	chunks::Chunk ihdr_chunk = chunks::parse_chunk(data, offset)!;
 	chunks::IhdrData ihdr = chunks::parse_ihdr(&ihdr_chunk)!;
 	offset += ihdr_chunk.total_size();
 
-	// Collect IDAT data and optional PLTE/tRNS
-	List{char} idat_buffer;
+	List {char} idat_buffer;
 	idat_buffer.init(allocator);
 	defer idat_buffer.free();
 
 	char[] palette;
 	char[] trns;
-
-	// Parse remaining chunks
-	while (offset < data.len) {
+	while CHUNKS: (offset < data.len)
+	{
 		chunks::Chunk chunk = chunks::parse_chunk(data, offset)!;
 		offset += chunk.total_size();
-
-		if (chunk.type[..] == "IDAT") {
-			idat_buffer.push_all(chunk.data);
-		} else if (chunk.type[..] == "PLTE") {
-			palette = chunk.data;
-		} else if (chunk.type[..] == "tRNS") {
-			trns = chunk.data;
-		} else if (chunk.type[..] == "IEND") {
-			break;
+		switch (chunk.type[..])
+		{
+			case "IDAT": idat_buffer.push_all(chunk.data);
+			case "PLTE": palette = chunk.data;
+			case "tRNS": trns = chunk.data;
+			case "IEND": break CHUNKS;
 		}
-		// Skip other chunks (ancillary)
 	}
 
-	// Validate palette requirement for indexed color
-	if (ihdr.color_type == chunks::COLOR_TYPE_INDEXED && palette.len == 0) {
-		return MISSING_PALETTE~;
-	}
+	bool indexed = ihdr.color_type == chunks::COLOR_TYPE_INDEXED;
+	if (indexed && palette.len == 0) return MISSING_PALETTE~;
 
-	// Decompress IDAT data
-	char[] compressed_data = idat_buffer.array_view();
-	char[] decompressed = zlib::decompress(allocator, compressed_data)!;
+	char[] decompressed = zlib::decompress(allocator, idat_buffer.array_view())!;
 	defer alloc::free(allocator, decompressed);
 
-	// Calculate bytes per pixel for filter reconstruction
-	sz filter_bpp = get_filter_bytes_per_pixel(ihdr.color_type, ihdr.bit_depth);
-
-	// Reconstruct filters in-place
+	sz filter_bpp = bytes_per_pixel(ihdr.color_type, ihdr.bit_depth);
+	// A truncated stream would otherwise be read past its end below.
+	if (decompressed.len < (sz)ihdr.height * ((sz)ihdr.width * filter_bpp + 1)) return INCOMPLETE_DATA~;
 	filters::reconstruct(decompressed, ihdr.width, ihdr.height, filter_bpp)!;
 
-	// Determine output format and allocate output buffer
-	PixelFormat out_format;
-	sz out_bpp;
+	PixelFormat out_format = indexed ? (trns.len > 0 ? RGBA : RGB) : color_type_to_format(ihdr.color_type);
+	sz out_bpp = indexed ? (trns.len > 0 ? 4 : 3) : filter_bpp;
+	char[] output = alloc::new_array(allocator, char, (sz)ihdr.width * (sz)ihdr.height * out_bpp);
 
-	if (ihdr.color_type == chunks::COLOR_TYPE_INDEXED) {
-		// Indexed will expand to RGB or RGBA
-		if (trns.len > 0) {
-			out_format = PixelFormat.RGBA;
-			out_bpp = 4;
-		} else {
-			out_format = PixelFormat.RGB;
-			out_bpp = 3;
-		}
-	} else {
-		out_format = color_type_to_format(ihdr.color_type);
-		out_bpp = get_output_bytes_per_pixel(ihdr.color_type, ihdr.bit_depth);
-	}
-
-	sz output_size = (sz)ihdr.width * (sz)ihdr.height * out_bpp;
-	char[] output = alloc::new_array(allocator, char, output_size);
-
-	if (ihdr.color_type == chunks::COLOR_TYPE_INDEXED) {
-		// Expand indexed to RGB/RGBA
+	if (indexed)
+	{
 		expand_indexed(decompressed, output, ihdr.width, ihdr.height, palette, trns);
-	} else {
-		// Compact pixels (remove filter bytes)
+	}
+	else
+	{
 		filters::compact_pixels(decompressed, output, ihdr.width, ihdr.height, filter_bpp);
 	}
 
@@ -114,72 +95,52 @@ fn Image? load_bytes(char[] data, Allocator allocator = mem) {
 
 fn Image? tload_bytes(char[] data) => load_bytes(data, tmem);
 
-fn PixelFormat color_type_to_format(char color_type) {
-	switch (color_type) {
-		case chunks::COLOR_TYPE_GRAYSCALE: return PixelFormat.GRAYSCALE;
-		case chunks::COLOR_TYPE_RGB: return PixelFormat.RGB;
-		case chunks::COLOR_TYPE_GRAYSCALE_ALPHA: return PixelFormat.GRAYSCALE_ALPHA;
-		case chunks::COLOR_TYPE_RGBA: return PixelFormat.RGBA;
-		default: return PixelFormat.RGBA;
+<*
+ @require color_type != chunks::COLOR_TYPE_INDEXED : "Indexed images are expanded separately"
+*>
+fn PixelFormat color_type_to_format(char color_type) @private
+{
+	switch (color_type)
+	{
+		case chunks::COLOR_TYPE_GRAYSCALE: return GRAYSCALE;
+		case chunks::COLOR_TYPE_RGB: return RGB;
+		case chunks::COLOR_TYPE_GRAYSCALE_ALPHA: return GRAYSCALE_ALPHA;
+		default: return RGBA;
 	}
 }
 
-fn sz get_filter_bytes_per_pixel(char color_type, char bit_depth) {
+// Bytes per pixel in the filtered scanlines; parse_ihdr has already rejected unknown color types.
+fn sz bytes_per_pixel(char color_type, char bit_depth) @private
+{
 	sz channels;
-	switch (color_type) {
-		case chunks::COLOR_TYPE_GRAYSCALE: channels = 1;
-		case chunks::COLOR_TYPE_RGB: channels = 3;
+	switch (color_type)
+	{
+		case chunks::COLOR_TYPE_GRAYSCALE:
 		case chunks::COLOR_TYPE_INDEXED: channels = 1;
 		case chunks::COLOR_TYPE_GRAYSCALE_ALPHA: channels = 2;
-		case chunks::COLOR_TYPE_RGBA: channels = 4;
-		default: channels = 4;
-	}
-	sz bytes_per_channel = bit_depth == 16 ? 2 : 1;
-	return channels * bytes_per_channel;
-}
-
-fn sz get_output_bytes_per_pixel(char color_type, char bit_depth) {
-	sz channels;
-	switch (color_type) {
-		case chunks::COLOR_TYPE_GRAYSCALE: channels = 1;
 		case chunks::COLOR_TYPE_RGB: channels = 3;
-		case chunks::COLOR_TYPE_GRAYSCALE_ALPHA: channels = 2;
-		case chunks::COLOR_TYPE_RGBA: channels = 4;
 		default: channels = 4;
 	}
-	sz bytes_per_channel = bit_depth == 16 ? 2 : 1;
-	return channels * bytes_per_channel;
+	return bit_depth == 16 ? channels * 2 : channels;
 }
 
-fn void expand_indexed(char[] scanlines, char[] output, uint width, uint height, char[] palette, char[] trns) {
-	sz stride = (sz)width + 1; // 1 byte per pixel + filter byte
+fn void expand_indexed(char[] scanlines, char[] output, uint width, uint height, char[] palette, char[] trns) @private
+{
+	sz stride = (sz)width + 1;
 	bool has_alpha = trns.len > 0;
 	sz out_bpp = has_alpha ? 4 : 3;
 
-	for (uint y = 0; y < height; y++) {
-		sz src_row = (sz)y * stride + 1; // Skip filter byte
+	for (uint y = 0; y < height; y++)
+	{
+		char[] src = scanlines[(sz)y * stride + 1 : width];
 		sz dst_row = (sz)y * (sz)width * out_bpp;
-
-		for (uint x = 0; x < width; x++) {
-			char index = scanlines[src_row + x];
+		foreach (x, index : src)
+		{
 			sz pal_offset = (sz)index * 3;
-			sz dst_offset = dst_row + (sz)x * out_bpp;
-
-			// Copy RGB from palette
-			if (pal_offset + 2 < palette.len) {
-				output[dst_offset] = palette[pal_offset];
-				output[dst_offset + 1] = palette[pal_offset + 1];
-				output[dst_offset + 2] = palette[pal_offset + 2];
-			}
-
-			// Add alpha if tRNS present
-			if (has_alpha) {
-				if ((sz)index < trns.len) {
-					output[dst_offset + 3] = trns[index];
-				} else {
-					output[dst_offset + 3] = 255;
-				}
-			}
+			sz dst = dst_row + x * out_bpp;
+			// Out-of-range indices are left black rather than rejected.
+			if (pal_offset + 2 < palette.len) output[dst:3] = palette[pal_offset:3];
+			if (has_alpha) output[dst + 3] = index < trns.len ? trns[index] : 255;
 		}
 	}
 }

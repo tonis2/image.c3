@@ -1,15 +1,15 @@
+<*
+ MP4 (and QuickTime .mov) video: the first video track's samples, read from
+ the file as they are needed and decoded with image::h264.
+*>
 module image::mp4;
 import image;
 import image::h264;
 import std::io;
 import std::io::file;
-import std::collections::list;
+import std::math;
 
-<*
- MP4 (and QuickTime .mov) video: the first video track's samples, read from
- the file as they are needed and decoded with image::h264.
-*>
-faultdef NOT_MP4, NO_VIDEO, NOT_H264, CORRUPT, NO_FRAME;
+excuse NOT_MP4, NO_VIDEO, NOT_H264, CORRUPT, NO_FRAME;
 
 struct Video
 {
@@ -25,16 +25,16 @@ struct Video
 	uint[] sizes;
 	usz[] syncs;     // sync sample indices, ascending; empty = every sample
 	h264::Decoder decoder;
-	List{char} sample;
+	char[] sample;   // read buffer, sized for the largest sample
 	sz decoded;      // the last sample decoded; -1 none
 	h264::Picture* current;
 }
 
-fn uint be32(char[] d, usz at) @inline => (uint)d[at] << 24 | (uint)d[at + 1] << 16 | (uint)d[at + 2] << 8 | (uint)d[at + 3];
-fn ulong be64(char[] d, usz at) @inline => (ulong)be32(d, at) << 32 | be32(d, at + 4);
+fn uint be32(char[] d, usz at) @inline @private => bitorder::read(d[at:4], UIntBE);
+fn ulong be64(char[] d, usz at) @inline @private => bitorder::read(d[at:8], ULongBE);
 
 // The child box `type` of the box body `data`; empty when it isn't there.
-fn char[] child(char[] data, String type)
+fn char[] child(char[] data, String type) @private
 {
 	usz at = 0;
 	while (at + 8 <= data.len)
@@ -58,6 +58,12 @@ fn char[] child(char[] data, String type)
 	return {};
 }
 
+<*
+ Open a video file and read its first H.264 video track's sample tables.
+
+ @return "The open video; release it with Video.close"
+ @return? NOT_MP4, NO_VIDEO, NOT_H264, CORRUPT, h264::Decoder.configure!
+*>
 fn Video? open(String path, Allocator allocator = mem)
 {
 	File f = file::open(path, "rb") ?? NOT_MP4~!;
@@ -77,7 +83,6 @@ fn void? Video.read_moov(&self, Allocator allocator)
 	char[16] head;
 	char[] moov;
 	defer if (moov.len > 0) alloc::free(allocator, moov);
-	bool typed;
 	while (at + 8 <= size)
 	{
 		self.file.seek(at)!;
@@ -97,7 +102,6 @@ fn void? Video.read_moov(&self, Allocator allocator)
 		}
 		String type = (String)head[4:4];
 		if (at == 0 && type != "ftyp" && type != "moov" && type != "wide" && type != "mdat" && type != "free") return NOT_MP4~;
-		typed = true;
 		if (box < (ulong)body || (long)box > size - at) return CORRUPT~;
 		if (type == "moov")
 		{
@@ -109,7 +113,6 @@ fn void? Video.read_moov(&self, Allocator allocator)
 		}
 		at += (long)box;
 	}
-	if (!typed) return NOT_MP4~;
 	if (moov.len == 0) return NOT_MP4~;
 
 	// The first track whose handler is 'vide'.
@@ -156,7 +159,12 @@ fn void? Video.read_track(&self, char[] mdia)
 	if (count == 0) return NO_VIDEO~;
 	self.frames = count;
 	self.sizes = alloc::new_array(self.allocator, uint, (sz)count);
-	for (usz i = 0; i < count; i++) self.sizes[i] = fixed != 0 ? fixed : be32(stsz, 12 + i * 4);
+	uint largest;
+	foreach (i, &size : self.sizes)
+	{
+		*size = fixed != 0 ? fixed : be32(stsz, 12 + (usz)i * 4);
+		largest = math::max(largest, *size);
+	}
 
 	// Chunk offsets, and how many samples each chunk holds (stsc runs).
 	char[] stco = child(stbl, "stco");
@@ -200,7 +208,6 @@ fn void? Video.read_track(&self, char[] mdia)
 	}
 
 	// The commonest frame duration gives the rate.
-	self.fps = 0;
 	char[] stts = child(stbl, "stts");
 	if (stts.len >= 8 && timescale > 0)
 	{
@@ -230,19 +237,22 @@ fn void? Video.read_track(&self, char[] mdia)
 		}
 	}
 
+	self.sample = alloc::new_array(self.allocator, char, largest);
 	self.decoder.init(self.allocator);
-	self.sample.init(self.allocator);
 	self.decoder.configure(avcc)!;
 }
 
+<*
+ Close the file and free everything the video owns; safe on a partly opened video.
+*>
 fn void Video.close(&self)
 {
 	(void)self.file.close();
 	if (self.offsets.len > 0) alloc::free(self.allocator, self.offsets);
 	if (self.sizes.len > 0) alloc::free(self.allocator, self.sizes);
 	if (self.syncs.len > 0) alloc::free(self.allocator, self.syncs);
+	if (self.sample.len > 0) alloc::free(self.allocator, self.sample);
 	if (self.decoder.allocator) self.decoder.free();
-	self.sample.free();
 	*self = {};
 }
 
@@ -262,6 +272,8 @@ fn usz Video.sync_before(&self, usz k)
 <*
  Frame `k` (in file order) as decoded planes, valid until the next call.
  Decodes forward from the last frame, or from the sync frame before `k`.
+
+ @return? NO_FRAME, CORRUPT, h264::Decoder.decode!
 *>
 fn h264::Picture*? Video.picture(&self, usz k)
 {
@@ -277,9 +289,7 @@ fn h264::Picture*? Video.picture(&self, usz k)
 	}
 	for (usz i = start; i <= k; i++)
 	{
-		self.sample.clear();
-		for (uint b = 0; b < self.sizes[i]; b++) self.sample.push(0);
-		char[] data = self.sample.array_view();
+		char[] data = self.sample[:self.sizes[i]];
 		self.file.seek((long)self.offsets[i])!;
 		if ((usz)self.file.read(data)! != data.len) return CORRUPT~;
 		self.decoded = -1;
@@ -291,9 +301,9 @@ fn h264::Picture*? Video.picture(&self, usz k)
 	return self.current;
 }
 
-// Frame `k` as an RGB image.
-fn Image? Video.frame(&self, usz k, Allocator allocator = mem)
-{
-	h264::Picture* p = self.picture(k)!;
-	return p.to_image(allocator);
-}
+<*
+ Frame `k` as an RGB image owned by `allocator`.
+
+ @return? Video.picture!
+*>
+fn Image? Video.frame(&self, usz k, Allocator allocator = mem) => self.picture(k).to_image(allocator);

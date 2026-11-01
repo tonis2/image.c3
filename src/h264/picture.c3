@@ -4,6 +4,8 @@ import image;
 <*
  The picture's shown area as 8-bit RGB: BT.709 when the stream says so, else
  BT.601; limited range unless flagged full. Chroma is nearest-sample.
+
+ @return "A new RGB image owned by `allocator`"
 *>
 fn Image Picture.to_image(&self, Allocator allocator = mem)
 {

@@ -1,72 +1,65 @@
 module image::png::filters;
+import std::math;
 
-faultdef INVALID_FILTER;
+excuse INVALID_FILTER;
 
-const char FILTER_NONE = 0;
-const char FILTER_SUB = 1;
-const char FILTER_UP = 2;
-const char FILTER_AVERAGE = 3;
-const char FILTER_PAETH = 4;
+const char FILTER_NONE @private = 0;
+const char FILTER_SUB @private = 1;
+const char FILTER_UP @private = 2;
+const char FILTER_AVERAGE @private = 3;
+const char FILTER_PAETH @private = 4;
 
-fn char paeth_predictor(int a, int b, int c) {
+fn char paeth_predictor(int a, int b, int c) @private
+{
 	int p = a + b - c;
-	int pa = p > a ? p - a : a - p;
-	int pb = p > b ? p - b : b - p;
-	int pc = p > c ? p - c : c - p;
-
-	if (pa <= pb && pa <= pc) {
-		return (char)a;
-	} else if (pb <= pc) {
-		return (char)b;
-	} else {
-		return (char)c;
-	}
+	int pa = math::abs(p - a);
+	int pb = math::abs(p - b);
+	int pc = math::abs(p - c);
+	if (pa <= pb && pa <= pc) return (char)a;
+	if (pb <= pc) return (char)b;
+	return (char)c;
 }
 
-// Reconstruct filtered scanlines in-place
-// scanlines: raw decompressed data with filter byte per row
-// width: image width in pixels
-// height: image height
-// bytes_per_pixel: number of bytes per pixel
-fn void? reconstruct(char[] scanlines, uint width, uint height, sz bytes_per_pixel) {
+<*
+ Undo the per-row filters in place; each row is a filter byte followed by the row data.
+
+ @require scanlines.len >= (sz)height * ((sz)width * bytes_per_pixel + 1) : "Scanline data too short"
+
+ @return? INVALID_FILTER
+*>
+fn void? reconstruct(char[] scanlines, uint width, uint height, sz bytes_per_pixel)
+{
 	sz row_bytes = (sz)width * bytes_per_pixel;
-	sz stride = row_bytes + 1; // +1 for filter byte
+	sz stride = row_bytes + 1;
 
-	for (uint y = 0; y < height; y++) {
+	for (uint y = 0; y < height; y++)
+	{
 		sz row_start = (sz)y * stride;
-		char filter_type = scanlines[row_start];
 		char[] row = scanlines[row_start + 1 : row_bytes];
-		char[] prev_row;
+		char[] prev_row = y > 0 ? scanlines[row_start - stride + 1 : row_bytes] : {};
 
-		if (y > 0) {
-			sz prev_start = ((sz)y - 1) * stride;
-			prev_row = scanlines[prev_start + 1 : row_bytes];
-		}
-
-		switch (filter_type) {
-			case FILTER_NONE: break;
+		switch (scanlines[row_start])
+		{
+			case FILTER_NONE:
+				break;
 			case FILTER_SUB:
-				for (sz i = bytes_per_pixel; i < row.len; i++) {
-					row[i] = (char)((uint)row[i] + (uint)row[i - bytes_per_pixel]);
-				}
+				for (sz i = bytes_per_pixel; i < row.len; i++) row[i] += row[i - bytes_per_pixel];
 			case FILTER_UP:
-				if (y > 0) {
-					for (sz i = 0; i < row.len; i++) {
-						row[i] = (char)((uint)row[i] + (uint)prev_row[i]);
-					}
-				}
+				foreach (i, up : prev_row) row[i] += up;
 			case FILTER_AVERAGE:
-				for (sz i = 0; i < row.len; i++) {
+				for (sz i = 0; i < row.len; i++)
+				{
 					uint left = i >= bytes_per_pixel ? row[i - bytes_per_pixel] : 0;
 					uint up = y > 0 ? prev_row[i] : 0;
-					row[i] = (char)((uint)row[i] + (left + up) / 2);
+					row[i] += (char)((left + up) / 2);
 				}
 			case FILTER_PAETH:
-				for (sz i = 0; i < row.len; i++) {
+				for (sz i = 0; i < row.len; i++)
+				{
 					int a = i >= bytes_per_pixel ? row[i - bytes_per_pixel] : 0;
 					int b = y > 0 ? prev_row[i] : 0;
-					int c = (i >= bytes_per_pixel && y > 0) ? prev_row[i - bytes_per_pixel] : 0;
-					row[i] = (char)((uint)row[i] + (uint)paeth_predictor(a, b, c));
+					int c = i >= bytes_per_pixel && y > 0 ? prev_row[i - bytes_per_pixel] : 0;
+					row[i] += paeth_predictor(a, b, c);
 				}
 			default:
 				return INVALID_FILTER~;
@@ -74,14 +67,17 @@ fn void? reconstruct(char[] scanlines, uint width, uint height, sz bytes_per_pix
 	}
 }
 
-// Remove filter bytes and compact pixel data
-fn void compact_pixels(char[] scanlines, char[] output, uint width, uint height, sz bytes_per_pixel) {
-	sz stride = (sz)width * bytes_per_pixel + 1;
-	sz out_stride = (sz)width * bytes_per_pixel;
+<*
+ Copy the row data out of filtered scanlines, dropping each row's filter byte.
 
-	for (uint y = 0; y < height; y++) {
-		sz src_start = (sz)y * stride + 1; // Skip filter byte
-		sz dst_start = (sz)y * out_stride;
-		output[dst_start : out_stride] = scanlines[src_start : out_stride];
+ @require scanlines.len >= (sz)height * ((sz)width * bytes_per_pixel + 1) : "Scanline data too short"
+ @require output.len >= (sz)height * (sz)width * bytes_per_pixel : "Output too small"
+*>
+fn void compact_pixels(char[] scanlines, char[] output, uint width, uint height, sz bytes_per_pixel)
+{
+	sz row_bytes = (sz)width * bytes_per_pixel;
+	for (uint y = 0; y < height; y++)
+	{
+		output[(sz)y * row_bytes : row_bytes] = scanlines[(sz)y * (row_bytes + 1) + 1 : row_bytes];
 	}
 }

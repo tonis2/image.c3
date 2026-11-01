@@ -1,160 +1,90 @@
-module image::png::test @test;
+module image::png::encode_test;
 import image::png;
 import std::io::file;
+import std::hash::crc32;
 
-fn void test_encode_rgba() {
-	char[16] pixels = {
-		255, 0, 0, 255,    0, 255, 0, 255,
-		0, 0, 255, 255,    255, 255, 0, 255,
-	};
-	Image img = {
-		.width = 2,
-		.height = 2,
-		.bit_depth = 8,
-		.format = RGBA,
-		.pixels = pixels[..],
-	};
+const char[16] RGBA_2X2 = { 255, 0, 0, 255,  0, 255, 0, 255,  0, 0, 255, 255,  255, 255, 0, 255 };
 
+fn void roundtrip(PixelFormat format, char[] pixels)
+{
+	Image img = { .width = 2, .height = 2, .bit_depth = 8, .format = format, .pixels = pixels };
 	char[] encoded = png::save_bytes(&img)!!;
 	defer alloc::free(mem, encoded);
 
 	Image decoded = png::load_bytes(encoded)!!;
 	defer decoded.free();
-
-	assert(decoded.width == 2);
-	assert(decoded.height == 2);
-	assert(decoded.bit_depth == 8);
-	assert(decoded.format == RGBA);
-	assert(decoded.pixels.len == 16);
-	for (sz i = 0; i < decoded.pixels.len; i++) {
-		assert(decoded.pixels[i] == pixels[i]);
-	}
+	test::@check(decoded.width == 2);
+	test::@check(decoded.height == 2);
+	test::@check(decoded.bit_depth == 8);
+	test::@check(decoded.format == format);
+	test::@check(decoded.pixels == pixels);
 }
 
-fn void test_encode_rgb() {
-	char[12] pixels = {
-		255, 0, 0,    0, 255, 0,
-		0, 0, 255,    255, 255, 0,
-	};
-	Image img = {
-		.width = 2,
-		.height = 2,
-		.bit_depth = 8,
-		.format = RGB,
-		.pixels = pixels[..],
-	};
+fn void test_encode_rgba() @test
+{
+	roundtrip(RGBA, &&RGBA_2X2);
+}
 
-	char[] encoded = png::save_bytes(&img)!!;
-	defer alloc::free(mem, encoded);
+fn void test_encode_rgb() @test
+{
+	roundtrip(RGB, &&(char[12]){ 255, 0, 0,  0, 255, 0,  0, 0, 255,  255, 255, 0 });
+}
 
-	Image decoded = png::load_bytes(encoded)!!;
+fn void test_encode_grayscale() @test
+{
+	roundtrip(GRAYSCALE, &&(char[4]){ 0, 85, 170, 255 });
+}
+
+fn void test_encode_grayscale_alpha() @test
+{
+	roundtrip(GRAYSCALE_ALPHA, &&(char[8]){ 0, 255,  85, 200,  170, 128,  255, 0 });
+}
+
+fn void test_save_file() @test
+{
+	const String PATH = "build/c3_test_encode.png";
+	char[16] pixels = RGBA_2X2;
+	Image img = { .width = 2, .height = 2, .bit_depth = 8, .format = RGBA, .pixels = &pixels };
+	png::save_file(&img, PATH)!!;
+	defer (void)file::delete(PATH);
+
+	Image decoded = png::load_file(PATH)!!;
 	defer decoded.free();
-
-	assert(decoded.width == 2);
-	assert(decoded.height == 2);
-	assert(decoded.format == RGB);
-	assert(decoded.pixels.len == 12);
-	for (sz i = 0; i < decoded.pixels.len; i++) {
-		assert(decoded.pixels[i] == pixels[i]);
-	}
+	test::@check(decoded.format == RGBA);
+	test::@check(decoded.pixels == pixels[..]);
 }
 
-fn void test_encode_grayscale() {
-	char[4] pixels = { 0, 85, 170, 255 };
-	Image img = {
-		.width = 2,
-		.height = 2,
-		.bit_depth = 8,
-		.format = GRAYSCALE,
-		.pixels = pixels[..],
-	};
-
-	char[] encoded = png::save_bytes(&img)!!;
-	defer alloc::free(mem, encoded);
-
-	Image decoded = png::load_bytes(encoded)!!;
-	defer decoded.free();
-
-	assert(decoded.width == 2);
-	assert(decoded.height == 2);
-	assert(decoded.format == GRAYSCALE);
-	assert(decoded.pixels.len == 4);
-	for (sz i = 0; i < decoded.pixels.len; i++) {
-		assert(decoded.pixels[i] == pixels[i]);
-	}
-}
-
-fn void test_encode_grayscale_alpha() {
-	char[8] pixels = {
-		0, 255,    85, 200,
-		170, 128,  255, 0,
-	};
-	Image img = {
-		.width = 2,
-		.height = 2,
-		.bit_depth = 8,
-		.format = GRAYSCALE_ALPHA,
-		.pixels = pixels[..],
-	};
-
-	char[] encoded = png::save_bytes(&img)!!;
-	defer alloc::free(mem, encoded);
-
-	Image decoded = png::load_bytes(encoded)!!;
-	defer decoded.free();
-
-	assert(decoded.width == 2);
-	assert(decoded.height == 2);
-	assert(decoded.format == GRAYSCALE_ALPHA);
-	assert(decoded.pixels.len == 8);
-	for (sz i = 0; i < decoded.pixels.len; i++) {
-		assert(decoded.pixels[i] == pixels[i]);
-	}
-}
-
-fn void test_save_file() {
-	char[16] pixels = {
-		255, 0, 0, 255,    0, 255, 0, 255,
-		0, 0, 255, 255,    255, 255, 0, 255,
-	};
-	Image img = {
-		.width = 2,
-		.height = 2,
-		.bit_depth = 8,
-		.format = RGBA,
-		.pixels = pixels[..],
-	};
-
-	png::save_file(&img, "/tmp/c3_test_encode.png")!!;
-
-	Image decoded = png::load_file("/tmp/c3_test_encode.png")!!;
-	defer decoded.free();
-
-	assert(decoded.width == 2);
-	assert(decoded.height == 2);
-	assert(decoded.format == RGBA);
-	assert(decoded.pixels.len == 16);
-	for (sz i = 0; i < decoded.pixels.len; i++) {
-		assert(decoded.pixels[i] == pixels[i]);
-	}
-}
-
-fn void test_roundtrip_existing() {
+fn void test_roundtrip_existing() @test
+{
 	Image original = png::load_file("test/test_rgba.png")!!;
 	defer original.free();
-
 	char[] encoded = png::save_bytes(&original)!!;
 	defer alloc::free(mem, encoded);
 
 	Image decoded = png::load_bytes(encoded)!!;
 	defer decoded.free();
+	test::@check(decoded.width == original.width);
+	test::@check(decoded.height == original.height);
+	test::@check(decoded.format == original.format);
+	test::@check(decoded.pixels == original.pixels);
+}
 
-	assert(decoded.width == original.width);
-	assert(decoded.height == original.height);
-	assert(decoded.bit_depth == original.bit_depth);
-	assert(decoded.format == original.format);
-	assert(decoded.pixels.len == original.pixels.len);
-	for (sz i = 0; i < decoded.pixels.len; i++) {
-		assert(decoded.pixels[i] == original.pixels[i]);
-	}
+fn void test_rejects_invalid_image() @test
+{
+	Image img = { .width = 2, .height = 2, .bit_depth = 8, .format = RGBA, .pixels = RGBA_2X2[:8] };
+	test::@error(png::save_bytes(&img), png::INVALID_IMAGE_DATA);
+}
+
+// A file whose IHDR claims more rows than its IDAT holds must fail cleanly.
+fn void test_truncated_idat() @test
+{
+	char[16] pixels = RGBA_2X2;
+	Image img = { .width = 2, .height = 2, .bit_depth = 8, .format = RGBA, .pixels = &pixels };
+	char[] encoded = png::save_bytes(&img)!!;
+	defer alloc::free(mem, encoded);
+
+	// IHDR data starts at byte 16; height is at 20 and the CRC follows the 13 data bytes.
+	bitorder::write(3u, encoded[20:4], UIntBE);
+	bitorder::write(crc32::hash(encoded[12:17]), encoded[29:4], UIntBE);
+	test::@error(png::load_bytes(encoded), png::INCOMPLETE_DATA);
 }
