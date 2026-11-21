@@ -10,6 +10,7 @@
     "src/image.c3"
   ],
   "targets" : {
+    "android-aarch64": {},
     "macos-x64" : {
       "linked-libraries" : []
     },
